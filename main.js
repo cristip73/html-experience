@@ -57,63 +57,64 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
   }
   async onLoadFile(file) {
     this.contentEl.empty();
-    const contents = await this.app.vault.readBinary(file);
-    const decoder = new TextDecoder();
-    const htmlStr = decoder.decode(contents);
-    this.mainView = this.contentEl.createDiv();
-    this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden;");
-    const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
-    toolbar.setAttribute("style", "display: flex; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
-    toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
-    toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
-    toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
-    const searchBar = this.contentEl.createDiv({ cls: "html-experience-search-bar" });
-    searchBar.setAttribute("style", "display: none; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
-    const searchInput = searchBar.createEl("input", {
-      attr: { type: "text", placeholder: "Search..." }
-    });
-    searchInput.setAttribute("style", "padding: 2px 6px; width: 200px;");
-    searchBar.createEl("button", { text: "Find" }).addEventListener("click", () => this.searchInIframe(searchInput.value));
-    searchBar.createEl("button", { text: "Clear" }).addEventListener("click", () => {
-      searchInput.value = "";
-      this.clearSearch();
-    });
-    searchBar.createEl("button", { text: "x" }).addEventListener("click", () => this.toggleSearchBar(false));
-    searchInput.addEventListener("input", () => {
-      if (searchInput.value) {
-        this.searchInIframe(searchInput.value);
-      } else {
+    try {
+      const contents = await this.app.vault.readBinary(file);
+      const decoder = new TextDecoder();
+      const htmlStr = decoder.decode(contents);
+      this.mainView = this.contentEl.createDiv();
+      this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden;");
+      const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
+      toolbar.setAttribute("style", "display: flex; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+      toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
+      toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
+      toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
+      const searchBar = this.contentEl.createDiv({ cls: "html-experience-search-bar" });
+      searchBar.setAttribute("style", "display: none; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+      const searchInput = searchBar.createEl("input", {
+        attr: { type: "text", placeholder: "Search..." }
+      });
+      searchInput.setAttribute("style", "padding: 2px 6px; width: 200px;");
+      searchBar.createEl("button", { text: "Find" }).addEventListener("click", () => this.searchInIframe(searchInput.value));
+      searchBar.createEl("button", { text: "Clear" }).addEventListener("click", () => {
+        searchInput.value = "";
         this.clearSearch();
+      });
+      searchBar.createEl("button", { text: "x" }).addEventListener("click", () => this.toggleSearchBar(false));
+      searchInput.addEventListener("input", () => {
+        if (searchInput.value) {
+          this.searchInIframe(searchInput.value);
+        } else {
+          this.clearSearch();
+        }
+      });
+      searchInput.addEventListener("keydown", (evt) => {
+        if (evt.key === "Escape") {
+          this.toggleSearchBar(false);
+        }
+      });
+      this.searchBar = searchBar;
+      this.searchInput = searchInput;
+      const sandbox = this.plugin.settings.enableScripts ? this.plugin.settings.sandboxPermissions : "allow-same-origin";
+      this.iframe = this.mainView.createEl("iframe", {
+        cls: "html-experience-iframe",
+        attr: { sandbox }
+      });
+      const baseHref = this.app.vault.getResourcePath(file);
+      const doc = new DOMParser().parseFromString(htmlStr, "text/html");
+      let baseElm = doc.querySelector("base");
+      if (!baseElm) {
+        baseElm = doc.createElement("base");
+        doc.head.prepend(baseElm);
       }
-    });
-    searchInput.addEventListener("keydown", (evt) => {
-      if (evt.key === "Escape") {
-        this.toggleSearchBar(false);
+      baseElm.setAttribute("href", baseHref);
+      if (this.plugin.settings.backgroundColorEnabled) {
+        const body = doc.querySelector("body");
+        if (body) {
+          body.style.backgroundColor = this.plugin.settings.backgroundColor;
+        }
       }
-    });
-    this.searchBar = searchBar;
-    this.searchInput = searchInput;
-    const sandbox = this.plugin.settings.enableScripts ? this.plugin.settings.sandboxPermissions : "allow-same-origin";
-    this.iframe = this.mainView.createEl("iframe", {
-      cls: "html-experience-iframe",
-      attr: { sandbox }
-    });
-    const baseHref = this.app.vault.getResourcePath(file);
-    const doc = new DOMParser().parseFromString(htmlStr, "text/html");
-    let baseElm = doc.querySelector("base");
-    if (!baseElm) {
-      baseElm = doc.createElement("base");
-      doc.head.prepend(baseElm);
-    }
-    baseElm.setAttribute("href", baseHref);
-    if (this.plugin.settings.backgroundColorEnabled) {
-      const body = doc.querySelector("body");
-      if (body) {
-        body.style.backgroundColor = this.plugin.settings.backgroundColor;
-      }
-    }
-    const zoomScript = doc.createElement("script");
-    zoomScript.textContent = `
+      const zoomScript = doc.createElement("script");
+      zoomScript.textContent = `
 			document.addEventListener("wheel", function(evt) {
 				if (evt.ctrlKey) {
 					evt.preventDefault();
@@ -137,39 +138,47 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
 				}
 			});
 		`;
-    doc.body.appendChild(zoomScript);
-    this.iframe.srcdoc = doc.documentElement.outerHTML;
-    this.iframe.addEventListener("wheel", (evt) => {
-      if (evt.ctrlKey) {
-        evt.preventDefault();
-        if (evt.deltaY < 0) {
-          this.zoomIn();
-        } else {
-          this.zoomOut();
+      doc.body.appendChild(zoomScript);
+      this.iframe.srcdoc = doc.documentElement.outerHTML;
+      this.iframe.addEventListener("wheel", (evt) => {
+        if (evt.ctrlKey) {
+          evt.preventDefault();
+          if (evt.deltaY < 0) {
+            this.zoomIn();
+          } else {
+            this.zoomOut();
+          }
         }
-      }
-    }, { passive: false });
-    this._messageHandler = (evt) => {
-      var _a, _b, _c;
-      if (((_a = evt.data) == null ? void 0 : _a.type) === "html-experience-zoom") {
-        if (evt.data.deltaY < 0) {
-          this.zoomIn();
-        } else {
-          this.zoomOut();
+      }, { passive: false });
+      this._messageHandler = (evt) => {
+        var _a, _b, _c;
+        if (((_a = evt.data) == null ? void 0 : _a.type) === "html-experience-zoom") {
+          if (evt.data.deltaY < 0) {
+            this.zoomIn();
+          } else {
+            this.zoomOut();
+          }
+        } else if (((_b = evt.data) == null ? void 0 : _b.type) === "html-experience-toggle-search") {
+          this.toggleSearchBar();
+        } else if (((_c = evt.data) == null ? void 0 : _c.type) === "html-experience-open-link") {
+          window.open(evt.data.url, "_blank");
         }
-      } else if (((_b = evt.data) == null ? void 0 : _b.type) === "html-experience-toggle-search") {
-        this.toggleSearchBar();
-      } else if (((_c = evt.data) == null ? void 0 : _c.type) === "html-experience-open-link") {
-        window.open(evt.data.url, "_blank");
-      }
-    };
-    window.addEventListener("message", this._messageHandler);
-    this.registerDomEvent(document, "keydown", (evt) => {
-      if (evt.ctrlKey && evt.key === "f" && this.searchBar) {
-        evt.preventDefault();
-        this.toggleSearchBar();
-      }
-    });
+      };
+      window.addEventListener("message", this._messageHandler);
+      this.registerDomEvent(document, "keydown", (evt) => {
+        if (evt.ctrlKey && evt.key === "f" && this.searchBar) {
+          evt.preventDefault();
+          this.toggleSearchBar();
+        }
+      });
+    } catch (error) {
+      this.contentEl.empty();
+      const errorDiv = this.contentEl.createDiv();
+      errorDiv.setAttribute("style", "padding: 20px; color: var(--text-error);");
+      errorDiv.createEl("h3", { text: "Failed to load HTML file" });
+      errorDiv.createEl("p", { text: error instanceof Error ? error.message : String(error) });
+      errorDiv.createEl("p", { text: "Try reloading or check if the file is valid HTML." });
+    }
   }
   zoomIn() {
     this.zoomLevel = Math.min(3, this.zoomLevel + 0.1);

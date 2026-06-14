@@ -45,9 +45,10 @@ class HTMLExperienceView extends FileView {
 	async onLoadFile(file: TFile): Promise<void> {
 		this.contentEl.empty();
 
-		const contents = await this.app.vault.readBinary(file);
-		const decoder = new TextDecoder();
-		const htmlStr = decoder.decode(contents);
+		try {
+			const contents = await this.app.vault.readBinary(file);
+			const decoder = new TextDecoder();
+			const htmlStr = decoder.decode(contents);
 
 		this.mainView = this.contentEl.createDiv();
 		this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden;");
@@ -176,6 +177,14 @@ class HTMLExperienceView extends FileView {
 				this.toggleSearchBar();
 			}
 		});
+		} catch (error) {
+			this.contentEl.empty();
+			const errorDiv = this.contentEl.createDiv();
+			errorDiv.setAttribute("style", "padding: 20px; color: var(--text-error);");
+			errorDiv.createEl("h3", { text: "Failed to load HTML file" });
+			errorDiv.createEl("p", { text: error instanceof Error ? error.message : String(error) });
+			errorDiv.createEl("p", { text: "Try reloading or check if the file is valid HTML." });
+		}
 	}
 
 	zoomIn(): void {

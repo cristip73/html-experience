@@ -129,6 +129,16 @@ class HTMLExperienceView extends FileView {
 					window.parent.postMessage({ type: "html-experience-toggle-search" }, "*");
 				}
 			});
+			document.addEventListener("click", function(evt) {
+				var link = evt.target.closest("a");
+				if (link && link.href) {
+					var href = link.href;
+					if (href.startsWith("http://") || href.startsWith("https://")) {
+						evt.preventDefault();
+						window.parent.postMessage({ type: "html-experience-open-link", url: href }, "*");
+					}
+				}
+			});
 		`;
 		doc.body.appendChild(zoomScript);
 
@@ -154,6 +164,8 @@ class HTMLExperienceView extends FileView {
 				}
 			} else if (evt.data?.type === "html-experience-toggle-search") {
 				this.toggleSearchBar();
+			} else if (evt.data?.type === "html-experience-open-link") {
+				window.open(evt.data.url, "_blank");
 			}
 		};
 		window.addEventListener("message", this._messageHandler);

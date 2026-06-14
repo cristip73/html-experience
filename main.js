@@ -126,6 +126,16 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
 					window.parent.postMessage({ type: "html-experience-toggle-search" }, "*");
 				}
 			});
+			document.addEventListener("click", function(evt) {
+				var link = evt.target.closest("a");
+				if (link && link.href) {
+					var href = link.href;
+					if (href.startsWith("http://") || href.startsWith("https://")) {
+						evt.preventDefault();
+						window.parent.postMessage({ type: "html-experience-open-link", url: href }, "*");
+					}
+				}
+			});
 		`;
     doc.body.appendChild(zoomScript);
     this.iframe.srcdoc = doc.documentElement.outerHTML;
@@ -140,7 +150,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       }
     }, { passive: false });
     this._messageHandler = (evt) => {
-      var _a, _b;
+      var _a, _b, _c;
       if (((_a = evt.data) == null ? void 0 : _a.type) === "html-experience-zoom") {
         if (evt.data.deltaY < 0) {
           this.zoomIn();
@@ -149,6 +159,8 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
         }
       } else if (((_b = evt.data) == null ? void 0 : _b.type) === "html-experience-toggle-search") {
         this.toggleSearchBar();
+      } else if (((_c = evt.data) == null ? void 0 : _c.type) === "html-experience-open-link") {
+        window.open(evt.data.url, "_blank");
       }
     };
     window.addEventListener("message", this._messageHandler);

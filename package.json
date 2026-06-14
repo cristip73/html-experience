@@ -1,6 +1,6 @@
 {
 	"name": "html-experience",
-	"version": "1.0.0",
+	"version": "0.1.0",
 	"description": "Open .html files with full JavaScript support",
 	"main": "main.js",
 	"scripts": {

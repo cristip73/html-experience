@@ -7,6 +7,8 @@ interface HTMLExperienceSettings {
 	sandboxPermissions: string;
 	backgroundColor: string;
 	backgroundColorEnabled: boolean;
+	showNavbar: boolean;
+	showThemeButton: boolean;
 }
 
 const DEFAULT_SETTINGS: HTMLExperienceSettings = {
@@ -14,6 +16,8 @@ const DEFAULT_SETTINGS: HTMLExperienceSettings = {
 	sandboxPermissions: "allow-scripts allow-same-origin allow-forms allow-popups allow-modals",
 	backgroundColor: "#ffffff",
 	backgroundColorEnabled: false,
+	showNavbar: true,
+	showThemeButton: true,
 };
 
 class HTMLExperienceView extends FileView {
@@ -23,6 +27,7 @@ class HTMLExperienceView extends FileView {
 	searchBar: HTMLDivElement | null = null;
 	searchInput: HTMLInputElement | null = null;
 	zoomLevel: number = 1;
+	forceDark: boolean = false;
 	_messageHandler: ((evt: MessageEvent) => void) | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: HTMLExperiencePlugin) {
@@ -51,10 +56,10 @@ class HTMLExperienceView extends FileView {
 			const htmlStr = decoder.decode(contents);
 
 		this.mainView = this.contentEl.createDiv();
-		this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden;");
+		this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden; position: relative;");
 
 		const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
-		toolbar.setAttribute("style", "display: flex; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+		toolbar.setAttribute("style", "display: " + (this.plugin.settings.showNavbar ? "flex" : "none") + "; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
 
 		toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
 		toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
@@ -99,6 +104,22 @@ class HTMLExperienceView extends FileView {
 			attr: { sandbox },
 		});
 
+		if (this.plugin.settings.showThemeButton) {
+			const isCurrentlyDark = this.forceDark || document.body.classList.contains("theme-dark");
+			const themeBtn = this.mainView.createEl("button", { text: isCurrentlyDark ? "\u2600" : "\u263E" });
+			const btnBg = isCurrentlyDark ? "#2a2a2a" : "#f0f0f0";
+			const btnColor = isCurrentlyDark ? "#f0c040" : "#1a1a1a";
+			themeBtn.setAttribute("style", "position: absolute; bottom: 16px; left: 16px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--background-modifier-border); background: " + btnBg + "; color: " + btnColor + "; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 50; transition: all 0.2s;");
+			themeBtn.addEventListener("click", () => {
+				this.forceDark = !this.forceDark;
+				const nowDark = this.forceDark;
+				themeBtn.textContent = nowDark ? "\u2600" : "\u263E";
+				themeBtn.style.background = nowDark ? "#2a2a2a" : "#f0f0f0";
+				themeBtn.style.color = nowDark ? "#f0c040" : "#1a1a1a";
+				this.toggleThemeStyles(nowDark);
+			});
+		}
+
 		const baseHref = this.app.vault.getResourcePath(file);
 		const doc = new DOMParser().parseFromString(htmlStr, "text/html");
 
@@ -114,6 +135,31 @@ class HTMLExperienceView extends FileView {
 			if (body) {
 				body.style.backgroundColor = this.plugin.settings.backgroundColor;
 			}
+		}
+
+		const isDark = this.forceDark || (!this.forceDark && document.body.classList.contains("theme-dark") && this.forceDark !== false);
+		if (isDark) {
+			const style = doc.createElement("style");
+			style.textContent = `
+				body, html { background-color: #1e1e1e !important; color: #d4d4d4 !important; }
+				a { color: #4fc1ff !important; }
+				h1, h2, h3, h4, h5, h6 { color: #e0e0e0 !important; }
+				code, pre { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
+				input, textarea, select { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
+				div, section, article, main, header, footer, nav, aside, p, span, li, td, th, blockquote, figure, figcaption {
+					color: inherit !important;
+				}
+				* { border-color: #444 !important; }
+			`;
+			doc.head.appendChild(style);
+		} else if (this.forceDark === false) {
+			const style = doc.createElement("style");
+			style.textContent = `
+				body, html { background-color: #ffffff !important; color: #1a1a1a !important; }
+				a { color: #0066cc !important; }
+				code, pre { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
+			`;
+			doc.head.appendChild(style);
 		}
 
 		const zoomScript = doc.createElement("script");
@@ -224,6 +270,35 @@ class HTMLExperienceView extends FileView {
 		}
 	}
 
+	toggleThemeStyles(dark: boolean): void {
+		if (!this.iframe?.contentDocument) return;
+		const existing = this.iframe.contentDocument.getElementById("html-experience-theme");
+		if (existing) existing.remove();
+		if (dark) {
+			const style = this.iframe.contentDocument.createElement("style");
+			style.id = "html-experience-theme";
+			style.textContent = `
+				body, html { background-color: #1e1e1e !important; color: #d4d4d4 !important; }
+				a { color: #4fc1ff !important; }
+				h1, h2, h3, h4, h5, h6 { color: #e0e0e0 !important; }
+				code, pre { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
+				input, textarea, select { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
+				div, section, article, main, header, footer, nav, aside, p, span, li, td, th, blockquote, figure, figcaption { color: inherit !important; }
+				* { border-color: #444 !important; }
+			`;
+			this.iframe.contentDocument.head.appendChild(style);
+		} else {
+			const style = this.iframe.contentDocument.createElement("style");
+			style.id = "html-experience-theme";
+			style.textContent = `
+				body, html { background-color: #ffffff !important; color: #1a1a1a !important; }
+				a { color: #0066cc !important; }
+				code, pre { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
+			`;
+			this.iframe.contentDocument.head.appendChild(style);
+		}
+	}
+
 	searchInIframe(query: string): void {
 		if (!this.iframe?.contentDocument || !query) return;
 		this.clearSearch();
@@ -314,6 +389,26 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.backgroundColorEnabled).onChange(async (value) => {
 					this.plugin.settings.backgroundColorEnabled = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Show navbar")
+			.setDesc("Show the toolbar with zoom controls.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showNavbar).onChange(async (value) => {
+					this.plugin.settings.showNavbar = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Show theme button")
+			.setDesc("Show the floating dark/light mode toggle button.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showThemeButton).onChange(async (value) => {
+					this.plugin.settings.showThemeButton = value;
 					await this.plugin.saveSettings();
 				})
 			);

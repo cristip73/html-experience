@@ -235,7 +235,7 @@ class HTMLExperienceView extends FileView {
 			`;
 			doc.body.appendChild(zoomScript);
 
-			this.iframe.srcdoc = doc.documentElement.outerHTML;
+			this.iframe.srcdoc = new XMLSerializer().serializeToString(doc);
 
 			this.iframe.addEventListener("wheel", (evt: WheelEvent) => {
 				if (evt.ctrlKey) {

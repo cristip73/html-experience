@@ -9,6 +9,7 @@ interface HTMLExperienceSettings {
 	backgroundColorEnabled: boolean;
 	showNavbar: boolean;
 	showThemeButton: boolean;
+	disableTheme: boolean;
 }
 
 const DEFAULT_SETTINGS: HTMLExperienceSettings = {
@@ -18,6 +19,7 @@ const DEFAULT_SETTINGS: HTMLExperienceSettings = {
 	backgroundColorEnabled: false,
 	showNavbar: true,
 	showThemeButton: true,
+	disableTheme: false,
 };
 
 class HTMLExperienceView extends FileView {
@@ -112,11 +114,10 @@ class HTMLExperienceView extends FileView {
 			themeBtn.setAttribute("style", "position: absolute; bottom: 16px; left: 16px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--background-modifier-border); background: " + btnBg + "; color: " + btnColor + "; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 50; transition: all 0.2s;");
 			themeBtn.addEventListener("click", () => {
 				this.forceDark = !this.forceDark;
-				const nowDark = this.forceDark;
-				themeBtn.textContent = nowDark ? "\u2600" : "\u263E";
-				themeBtn.style.background = nowDark ? "#2a2a2a" : "#f0f0f0";
-				themeBtn.style.color = nowDark ? "#f0c040" : "#1a1a1a";
-				this.toggleThemeStyles(nowDark);
+				themeBtn.textContent = this.forceDark ? "\u2600" : "\u263E";
+				themeBtn.style.background = this.forceDark ? "#2a2a2a" : "#f0f0f0";
+				themeBtn.style.color = this.forceDark ? "#f0c040" : "#1a1a1a";
+				this.toggleThemeStyles(this.forceDark);
 			});
 		}
 
@@ -137,27 +138,43 @@ class HTMLExperienceView extends FileView {
 			}
 		}
 
-		const isDark = this.forceDark || (!this.forceDark && document.body.classList.contains("theme-dark") && this.forceDark !== false);
-		if (isDark) {
+		const isDark = this.forceDark || (!this.forceDark && document.body.classList.contains("theme-dark"));
+		const hasCustomBg = this.plugin.settings.backgroundColorEnabled;
+		const themeDisabled = this.plugin.settings.disableTheme;
+		if (!themeDisabled && isDark) {
 			const style = doc.createElement("style");
 			style.textContent = `
-				body, html { background-color: #1e1e1e !important; color: #d4d4d4 !important; }
+				${hasCustomBg ? "" : "body, html { background-color: #1e1e1e !important; }"}
+				*, *::before, *::after { color: #d4d4d4 !important; border-color: #444 !important; background-color: transparent !important; }
 				a { color: #4fc1ff !important; }
 				h1, h2, h3, h4, h5, h6 { color: #e0e0e0 !important; }
-				code, pre { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
-				input, textarea, select { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
-				div, section, article, main, header, footer, nav, aside, p, span, li, td, th, blockquote, figure, figcaption {
-					color: inherit !important;
-				}
-				* { border-color: #444 !important; }
+				p, span, li, td, th, div, section, article, main, header, footer, nav, aside, label, caption, dt, dd { color: #d4d4d4 !important; }
+				code, pre, kbd, samp { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
+				input, textarea, select, button { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
+				table { border-color: #444 !important; }
+				th { background-color: #2a2a2a !important; }
+				tr:nth-child(even) { background-color: #252525 !important; }
+				blockquote { border-left-color: #4fc1ff !important; color: #b0b0b0 !important; background-color: #2a2a2a !important; }
+				hr { border-color: #444 !important; }
+				svg { fill: #d4d4d4 !important; }
+				img { opacity: 0.9; }
+				.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #2a2a2a !important; border-color: #444 !important; }
+				ol, ul { padding-left: 20px; }
+				li { margin-bottom: 4px; }
 			`;
 			doc.head.appendChild(style);
-		} else if (this.forceDark === false) {
+		} else if (!themeDisabled && this.forceDark === false) {
 			const style = doc.createElement("style");
 			style.textContent = `
-				body, html { background-color: #ffffff !important; color: #1a1a1a !important; }
+				${hasCustomBg ? "" : "body, html { background-color: #ffffff !important; }"}
+				*, *::before, *::after { color: #1a1a1a !important; background-color: transparent !important; }
 				a { color: #0066cc !important; }
-				code, pre { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
+				code, pre, kbd, samp { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
+				input, textarea, select, button { background-color: #ffffff !important; color: #1a1a1a !important; border-color: #ccc !important; }
+				th { background-color: #f0f0f0 !important; }
+				blockquote { border-left-color: #0066cc !important; background-color: #f9f9f9 !important; }
+				svg { fill: #1a1a1a !important; }
+				.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #f5f5f5 !important; border-color: #ddd !important; }
 			`;
 			doc.head.appendChild(style);
 		}
@@ -274,26 +291,41 @@ class HTMLExperienceView extends FileView {
 		if (!this.iframe?.contentDocument) return;
 		const existing = this.iframe.contentDocument.getElementById("html-experience-theme");
 		if (existing) existing.remove();
+		const hasCustomBg = this.plugin.settings.backgroundColorEnabled;
 		if (dark) {
 			const style = this.iframe.contentDocument.createElement("style");
 			style.id = "html-experience-theme";
 			style.textContent = `
-				body, html { background-color: #1e1e1e !important; color: #d4d4d4 !important; }
+				${hasCustomBg ? "" : "body, html { background-color: #1e1e1e !important; }"}
+				*, *::before, *::after { color: #d4d4d4 !important; border-color: #444 !important; background-color: transparent !important; }
 				a { color: #4fc1ff !important; }
 				h1, h2, h3, h4, h5, h6 { color: #e0e0e0 !important; }
-				code, pre { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
-				input, textarea, select { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
-				div, section, article, main, header, footer, nav, aside, p, span, li, td, th, blockquote, figure, figcaption { color: inherit !important; }
-				* { border-color: #444 !important; }
+				p, span, li, td, th, div, section, article, main, header, footer, nav, aside, label, caption, dt, dd { color: #d4d4d4 !important; }
+				code, pre, kbd, samp { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
+				input, textarea, select, button { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
+				table { border-color: #444 !important; }
+				th { background-color: #2a2a2a !important; }
+				tr:nth-child(even) { background-color: #252525 !important; }
+				blockquote { border-left-color: #4fc1ff !important; color: #b0b0b0 !important; background-color: #2a2a2a !important; }
+				hr { border-color: #444 !important; }
+				svg { fill: #d4d4d4 !important; }
+				img { opacity: 0.9; }
+				.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #2a2a2a !important; border-color: #444 !important; }
 			`;
 			this.iframe.contentDocument.head.appendChild(style);
 		} else {
 			const style = this.iframe.contentDocument.createElement("style");
 			style.id = "html-experience-theme";
 			style.textContent = `
-				body, html { background-color: #ffffff !important; color: #1a1a1a !important; }
+				${hasCustomBg ? "" : "body, html { background-color: #ffffff !important; }"}
+				*, *::before, *::after { color: #1a1a1a !important; background-color: transparent !important; }
 				a { color: #0066cc !important; }
-				code, pre { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
+				code, pre, kbd, samp { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
+				input, textarea, select, button { background-color: #ffffff !important; color: #1a1a1a !important; border-color: #ccc !important; }
+				th { background-color: #f0f0f0 !important; }
+				blockquote { border-left-color: #0066cc !important; background-color: #f9f9f9 !important; }
+				svg { fill: #1a1a1a !important; }
+				.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #f5f5f5 !important; border-color: #ddd !important; }
 			`;
 			this.iframe.contentDocument.head.appendChild(style);
 		}
@@ -356,7 +388,7 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Enable JavaScript")
-			.setDesc("Allow scripts to run in HTML files. Disable for untrusted content.")
+			.setDesc("When ON, scripts in HTML files will run. Turn OFF for safer viewing of untrusted files.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.enableScripts).onChange(async (value) => {
 					this.plugin.settings.enableScripts = value;
@@ -366,7 +398,7 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Sandbox permissions")
-			.setDesc("Space-separated list of iframe sandbox permissions.")
+			.setDesc("Advanced: controls what the HTML viewer is allowed to do. Only change if you know what you're doing.")
 			.addText((text) =>
 				text
 					.setPlaceholder("allow-scripts allow-same-origin...")
@@ -378,8 +410,8 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Background color")
-			.setDesc("Set a custom background color for HTML files.")
+			.setName("Custom background color")
+			.setDesc("Override the HTML's own background with a color you pick. This color always applies, even in dark/light mode.")
 			.addColorPicker((picker) =>
 				picker.setValue(this.plugin.settings.backgroundColor).onChange(async (value) => {
 					this.plugin.settings.backgroundColor = value;
@@ -394,8 +426,8 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Show navbar")
-			.setDesc("Show the toolbar with zoom controls.")
+			.setName("Show toolbar")
+			.setDesc("Show the top bar with zoom in, zoom out, and reset buttons.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.showNavbar).onChange(async (value) => {
 					this.plugin.settings.showNavbar = value;
@@ -404,11 +436,21 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Show theme button")
-			.setDesc("Show the floating dark/light mode toggle button.")
+			.setName("Show theme toggle button")
+			.setDesc("Show the floating moon/sun button (bottom-left) to switch between dark and light mode.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.showThemeButton).onChange(async (value) => {
 					this.plugin.settings.showThemeButton = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Use original HTML colors")
+			.setDesc("Turn OFF all dark/light mode styling so you see the HTML file exactly as it was designed.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.disableTheme).onChange(async (value) => {
+					this.plugin.settings.disableTheme = value;
 					await this.plugin.saveSettings();
 				})
 			);

@@ -1,11 +1,8 @@
-import { App, ItemView, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { FileView, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 
 const VIEW_TYPE_HTML_EXPERIENCE = "html-experience-view";
 
-class HTMLExperienceView extends ItemView {
-	file: TFile | null = null;
-	iframe: HTMLIFrameElement | null = null;
-
+class HTMLExperienceView extends FileView {
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
 	}
@@ -14,46 +11,46 @@ class HTMLExperienceView extends ItemView {
 		return VIEW_TYPE_HTML_EXPERIENCE;
 	}
 
-	getDisplayText(): string {
-		return this.file ? this.file.name : "HTML Experience";
-	}
-
 	getIcon(): string {
 		return "code-glyph";
 	}
 
-	async onOpen(): Promise<void> {
-		const container = this.containerEl.children[1];
-		container.empty();
-		container.addClass("html-experience-container");
+	canAcceptExtension(extension: string): boolean {
+		return ["html", "htm"].includes(extension);
+	}
 
-		this.iframe = container.createEl("iframe", {
+	async onLoadFile(file: TFile): Promise<void> {
+		this.contentEl.empty();
+
+		const contents = await this.app.vault.readBinary(file);
+		const decoder = new TextDecoder();
+		const htmlStr = decoder.decode(contents);
+
+		const mainView = this.contentEl.createDiv();
+		mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0;");
+
+		const iframe = mainView.createEl("iframe", {
 			cls: "html-experience-iframe",
 			attr: {
-				sandbox: "allow-scripts allow-same-origin allow-forms allow-popups",
-				frameborder: "0",
+				sandbox: "allow-scripts allow-same-origin allow-forms allow-popups allow-modals",
 			},
 		});
 
-		if (this.file) {
-			await this.loadFile(this.file);
+		const baseHref = this.app.vault.getResourcePath(file);
+		const doc = new DOMParser().parseFromString(htmlStr, "text/html");
+
+		let baseElm = doc.querySelector("base");
+		if (!baseElm) {
+			baseElm = doc.createElement("base");
+			doc.head.prepend(baseElm);
 		}
+		baseElm.setAttribute("href", baseHref);
+
+		iframe.srcdoc = doc.documentElement.outerHTML;
 	}
 
-	async loadFile(file: TFile): Promise<void> {
-		this.file = file;
-		if (!this.iframe) return;
-
-		const content = await this.app.vault.read(file);
-		const blob = new Blob([content], { type: "text/html" });
-		const url = URL.createObjectURL(blob);
-		this.iframe.src = url;
-	}
-
-	async onClose(): Promise<void> {
-		if (this.iframe?.src) {
-			URL.revokeObjectURL(this.iframe.src);
-		}
+	canRenameExtension(extension: string): boolean {
+		return false;
 	}
 }
 
@@ -62,40 +59,6 @@ export default class HTMLExperiencePlugin extends Plugin {
 		this.registerView(VIEW_TYPE_HTML_EXPERIENCE, (leaf) => new HTMLExperienceView(leaf));
 
 		this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML_EXPERIENCE);
-
-		this.addCommand({
-			id: "open-html-in-experience",
-			name: "Open current file in HTML Experience",
-			checkCallback: (checking: boolean) => {
-				const activeFile = this.app.workspace.getActiveFile();
-				if (activeFile && (activeFile.extension === "html" || activeFile.extension === "htm")) {
-					if (!checking) {
-						this.openHTMLFile(activeFile);
-					}
-					return true;
-				}
-				return false;
-			},
-		});
-	}
-
-	async openHTMLFile(file: TFile): Promise<void> {
-		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_HTML_EXPERIENCE);
-		let leaf: WorkspaceLeaf;
-
-		if (leaves.length > 0) {
-			leaf = leaves[0];
-		} else {
-			leaf = this.app.workspace.getLeaf("tab");
-			await leaf.setViewState({
-				type: VIEW_TYPE_HTML_EXPERIENCE,
-				active: true,
-			});
-		}
-
-		const view = leaf.view as HTMLExperienceView;
-		await view.loadFile(file);
-		this.app.workspace.revealLeaf(leaf);
 	}
 
 	async onunload(): Promise<void> {

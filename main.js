@@ -36,7 +36,8 @@ var DEFAULT_SETTINGS = {
   backgroundColorEnabled: false,
   showNavbar: true,
   showThemeButton: true,
-  disableTheme: false
+  disableTheme: false,
+  mhtmlSupport: false
 };
 var HTMLExperienceView = class extends import_obsidian.FileView {
   constructor(leaf, plugin) {
@@ -57,14 +58,17 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     return "code-glyph";
   }
   canAcceptExtension(extension) {
-    return ["html", "htm"].includes(extension);
+    return ["html", "htm", "mht", "mhtml"].includes(extension);
   }
   async onLoadFile(file) {
     this.contentEl.empty();
     try {
       const contents = await this.app.vault.readBinary(file);
       const decoder = new TextDecoder();
-      const htmlStr = decoder.decode(contents);
+      let htmlStr = decoder.decode(contents);
+      if (file.extension === "mht" || file.extension === "mhtml") {
+        htmlStr = this.parseMhtml(htmlStr);
+      }
       this.mainView = this.contentEl.createDiv();
       this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden; position: relative;");
       const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
@@ -238,6 +242,35 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       errorDiv.createEl("p", { text: "Try reloading or check if the file is valid HTML." });
     }
   }
+  parseMhtml(mhtml) {
+    var _a, _b, _c, _d, _e, _f;
+    const boundary = (_b = (_a = mhtml.match(/boundary=(.+)/i)) == null ? void 0 : _a[1]) == null ? void 0 : _b.trim();
+    if (!boundary) return mhtml;
+    const parts = mhtml.split("--" + boundary);
+    let htmlContent = "";
+    const resources = {};
+    for (const part of parts) {
+      const headerEnd = part.indexOf("\r\n\r\n");
+      if (headerEnd === -1) continue;
+      const header = part.substring(0, headerEnd);
+      const body = part.substring(headerEnd + 4).trim();
+      const contentType = (_d = (_c = header.match(/Content-Type:\s*(.+)/i)) == null ? void 0 : _c[1]) == null ? void 0 : _d.trim();
+      const location = (_f = (_e = header.match(/Content-Location:\s*(.+)/i)) == null ? void 0 : _e[1]) == null ? void 0 : _f.trim();
+      if (contentType == null ? void 0 : contentType.startsWith("text/html")) {
+        htmlContent = body;
+      } else if (location && body) {
+        const dataUrl = `data:${contentType};base64,${btoa(unescape(encodeURIComponent(body)))}`;
+        resources[location] = dataUrl;
+      }
+    }
+    if (htmlContent) {
+      for (const [url, dataUrl] of Object.entries(resources)) {
+        const encoded = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        htmlContent = htmlContent.replace(new RegExp(encoded, "g"), dataUrl);
+      }
+    }
+    return htmlContent || mhtml;
+  }
   zoomIn() {
     this.zoomLevel = Math.min(3, this.zoomLevel + 0.1);
     this.applyZoom();
@@ -403,6 +436,12 @@ var HTMLExperienceSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("MHTML support").setDesc("Enable opening MHTML (.mht, .mhtml) web archive files.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.mhtmlSupport).onChange(async (value) => {
+        this.plugin.settings.mhtmlSupport = value;
+        await this.plugin.saveSettings();
+      })
+    );
     containerEl.createEl("h3", { text: "Actions" });
     new import_obsidian.Setting(containerEl).setName("Reload active view").setDesc("Refresh the currently open HTML file to apply new settings.").addButton(
       (btn) => btn.setButtonText("Reload").onClick(async () => {
@@ -419,7 +458,7 @@ var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
   async onload() {
     await this.loadSettings();
     this.registerView(VIEW_TYPE_HTML_EXPERIENCE, (leaf) => new HTMLExperienceView(leaf, this));
-    this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML_EXPERIENCE);
+    this.registerExtensions(["html", "htm", "mht", "mhtml"], VIEW_TYPE_HTML_EXPERIENCE);
     this.registerEvent(
       this.app.vault.on("modify", (file) => {
         if (file instanceof import_obsidian.TFile && ["html", "htm"].includes(file.extension)) {

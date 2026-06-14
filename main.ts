@@ -10,6 +10,7 @@ interface HTMLExperienceSettings {
 	showNavbar: boolean;
 	showThemeButton: boolean;
 	disableTheme: boolean;
+	mhtmlSupport: boolean;
 }
 
 const DEFAULT_SETTINGS: HTMLExperienceSettings = {
@@ -20,6 +21,7 @@ const DEFAULT_SETTINGS: HTMLExperienceSettings = {
 	showNavbar: true,
 	showThemeButton: true,
 	disableTheme: false,
+	mhtmlSupport: false,
 };
 
 class HTMLExperienceView extends FileView {
@@ -46,7 +48,7 @@ class HTMLExperienceView extends FileView {
 	}
 
 	canAcceptExtension(extension: string): boolean {
-		return ["html", "htm"].includes(extension);
+		return ["html", "htm", "mht", "mhtml"].includes(extension);
 	}
 
 	async onLoadFile(file: TFile): Promise<void> {
@@ -55,7 +57,11 @@ class HTMLExperienceView extends FileView {
 		try {
 			const contents = await this.app.vault.readBinary(file);
 			const decoder = new TextDecoder();
-			const htmlStr = decoder.decode(contents);
+			let htmlStr = decoder.decode(contents);
+
+			if (file.extension === "mht" || file.extension === "mhtml") {
+				htmlStr = this.parseMhtml(htmlStr);
+			}
 
 		this.mainView = this.contentEl.createDiv();
 		this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden; position: relative;");
@@ -248,6 +254,41 @@ class HTMLExperienceView extends FileView {
 			errorDiv.createEl("p", { text: error instanceof Error ? error.message : String(error) });
 			errorDiv.createEl("p", { text: "Try reloading or check if the file is valid HTML." });
 		}
+	}
+
+	parseMhtml(mhtml: string): string {
+		const boundary = mhtml.match(/boundary=(.+)/i)?.[1]?.trim();
+		if (!boundary) return mhtml;
+
+		const parts = mhtml.split("--" + boundary);
+		let htmlContent = "";
+		const resources: { [key: string]: string } = {};
+
+		for (const part of parts) {
+			const headerEnd = part.indexOf("\r\n\r\n");
+			if (headerEnd === -1) continue;
+			const header = part.substring(0, headerEnd);
+			const body = part.substring(headerEnd + 4).trim();
+
+			const contentType = header.match(/Content-Type:\s*(.+)/i)?.[1]?.trim();
+			const location = header.match(/Content-Location:\s*(.+)/i)?.[1]?.trim();
+
+			if (contentType?.startsWith("text/html")) {
+				htmlContent = body;
+			} else if (location && body) {
+				const dataUrl = `data:${contentType};base64,${btoa(unescape(encodeURIComponent(body)))}`;
+				resources[location] = dataUrl;
+			}
+		}
+
+		if (htmlContent) {
+			for (const [url, dataUrl] of Object.entries(resources)) {
+				const encoded = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+				htmlContent = htmlContent.replace(new RegExp(encoded, "g"), dataUrl);
+			}
+		}
+
+		return htmlContent || mhtml;
 	}
 
 	zoomIn(): void {
@@ -455,6 +496,16 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 				})
 			);
 
+		new Setting(containerEl)
+			.setName("MHTML support")
+			.setDesc("Enable opening MHTML (.mht, .mhtml) web archive files.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.mhtmlSupport).onChange(async (value) => {
+					this.plugin.settings.mhtmlSupport = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
 		containerEl.createEl("h3", { text: "Actions" });
 
 		new Setting(containerEl)
@@ -476,7 +527,7 @@ export default class HTMLExperiencePlugin extends Plugin {
 
 		this.registerView(VIEW_TYPE_HTML_EXPERIENCE, (leaf) => new HTMLExperienceView(leaf, this));
 
-		this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML_EXPERIENCE);
+		this.registerExtensions(["html", "htm", "mht", "mhtml"], VIEW_TYPE_HTML_EXPERIENCE);
 
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {

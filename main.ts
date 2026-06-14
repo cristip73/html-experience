@@ -18,6 +18,10 @@ const DEFAULT_SETTINGS: HTMLExperienceSettings = {
 
 class HTMLExperienceView extends FileView {
 	plugin: HTMLExperiencePlugin;
+	iframe: HTMLIFrameElement | null = null;
+	mainView: HTMLDivElement | null = null;
+	zoomLevel: number = 1;
+	_messageHandler: ((evt: MessageEvent) => void) | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: HTMLExperiencePlugin) {
 		super(leaf);
@@ -43,14 +47,21 @@ class HTMLExperienceView extends FileView {
 		const decoder = new TextDecoder();
 		const htmlStr = decoder.decode(contents);
 
-		const mainView = this.contentEl.createDiv();
-		mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0;");
+		this.mainView = this.contentEl.createDiv();
+		this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden;");
+
+		const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
+		toolbar.setAttribute("style", "display: flex; gap: 4px; padding: 4px; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+
+		toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
+		toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
+		toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
 
 		const sandbox = this.plugin.settings.enableScripts
 			? this.plugin.settings.sandboxPermissions
 			: "allow-same-origin";
 
-		const iframe = mainView.createEl("iframe", {
+		this.iframe = this.mainView.createEl("iframe", {
 			cls: "html-experience-iframe",
 			attr: { sandbox },
 		});
@@ -72,11 +83,75 @@ class HTMLExperienceView extends FileView {
 			}
 		}
 
-		iframe.srcdoc = doc.documentElement.outerHTML;
+		const zoomScript = doc.createElement("script");
+		zoomScript.textContent = `
+			document.addEventListener("wheel", function(evt) {
+				if (evt.ctrlKey) {
+					evt.preventDefault();
+					window.parent.postMessage({ type: "html-experience-zoom", deltaY: evt.deltaY }, "*");
+				}
+			}, { passive: false });
+		`;
+		doc.body.appendChild(zoomScript);
+
+		this.iframe.srcdoc = doc.documentElement.outerHTML;
+
+		this.iframe.addEventListener("wheel", (evt: WheelEvent) => {
+			if (evt.ctrlKey) {
+				evt.preventDefault();
+				if (evt.deltaY < 0) {
+					this.zoomIn();
+				} else {
+					this.zoomOut();
+				}
+			}
+		}, { passive: false });
+
+		this._messageHandler = (evt: MessageEvent) => {
+			if (evt.data?.type === "html-experience-zoom") {
+				if (evt.data.deltaY < 0) {
+					this.zoomIn();
+				} else {
+					this.zoomOut();
+				}
+			}
+		};
+		window.addEventListener("message", this._messageHandler);
+	}
+
+	zoomIn(): void {
+		this.zoomLevel = Math.min(3, this.zoomLevel + 0.1);
+		this.applyZoom();
+	}
+
+	zoomOut(): void {
+		this.zoomLevel = Math.max(0.3, this.zoomLevel - 0.1);
+		this.applyZoom();
+	}
+
+	resetZoom(): void {
+		this.zoomLevel = 1;
+		this.applyZoom();
+	}
+
+	private applyZoom(): void {
+		if (this.iframe) {
+			this.iframe.style.transform = `scale(${this.zoomLevel})`;
+			this.iframe.style.transformOrigin = "top left";
+			this.iframe.style.width = `${100 / this.zoomLevel}%`;
+			this.iframe.style.height = `${100 / this.zoomLevel}%`;
+		}
 	}
 
 	canRenameExtension(extension: string): boolean {
 		return false;
+	}
+
+	async onUnloadFile(): Promise<void> {
+		if (this._messageHandler) {
+			window.removeEventListener("message", this._messageHandler);
+			this._messageHandler = null;
+		}
 	}
 }
 
@@ -168,6 +243,45 @@ export default class HTMLExperiencePlugin extends Plugin {
 			id: "reload-html-view",
 			name: "Reload active HTML view",
 			callback: () => this.reloadActiveView(),
+		});
+
+		this.addCommand({
+			id: "zoom-in",
+			name: "Zoom in",
+			checkCallback: (checking: boolean) => {
+				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+				if (view) {
+					if (!checking) view.zoomIn();
+					return true;
+				}
+				return false;
+			},
+		});
+
+		this.addCommand({
+			id: "zoom-out",
+			name: "Zoom out",
+			checkCallback: (checking: boolean) => {
+				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+				if (view) {
+					if (!checking) view.zoomOut();
+					return true;
+				}
+				return false;
+			},
+		});
+
+		this.addCommand({
+			id: "reset-zoom",
+			name: "Reset zoom",
+			checkCallback: (checking: boolean) => {
+				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+				if (view) {
+					if (!checking) view.resetZoom();
+					return true;
+				}
+				return false;
+			},
 		});
 
 		this.addSettingTab(new HTMLExperienceSettingTab(this.app, this));

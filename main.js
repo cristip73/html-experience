@@ -46,6 +46,9 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     this.mainView = null;
     this.searchBar = null;
     this.searchInput = null;
+    this.matchCountEl = null;
+    this.currentMatch = 0;
+    this.totalMatches = 0;
     this.zoomLevel = 1;
     this.forceDark = false;
     this._messageHandler = null;
@@ -83,12 +86,32 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
         attr: { type: "text", placeholder: "Search..." }
       });
       searchInput.setAttribute("style", "padding: 2px 6px; width: 200px;");
-      searchBar.createEl("button", { text: "Find" }).addEventListener("click", () => this.searchInIframe(searchInput.value));
-      searchBar.createEl("button", { text: "Clear" }).addEventListener("click", () => {
+      const matchCount = searchBar.createEl("span", { text: "" });
+      matchCount.setAttribute("style", "font-size: 12px; color: var(--text-muted); min-width: 50px;");
+      const prevBtn = searchBar.createEl("button", { text: "\u25B2" });
+      prevBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.searchPrevious();
+        searchInput.focus();
+      });
+      const nextBtn = searchBar.createEl("button", { text: "\u25BC" });
+      nextBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.searchNext();
+        searchInput.focus();
+      });
+      searchBar.createEl("button", { text: "Clear" }).addEventListener("click", (e) => {
+        e.stopPropagation();
         searchInput.value = "";
         this.clearSearch();
+        matchCount.textContent = "";
+        searchInput.focus();
       });
-      searchBar.createEl("button", { text: "x" }).addEventListener("click", () => this.toggleSearchBar(false));
+      const closeBtn = searchBar.createEl("button", { text: "x" });
+      closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.toggleSearchBar(false);
+      });
       searchInput.addEventListener("input", () => {
         if (searchInput.value) {
           this.searchInIframe(searchInput.value);
@@ -99,10 +122,18 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       searchInput.addEventListener("keydown", (evt) => {
         if (evt.key === "Escape") {
           this.toggleSearchBar(false);
+        } else if (evt.key === "Enter") {
+          evt.preventDefault();
+          if (evt.shiftKey) {
+            this.searchPrevious();
+          } else {
+            this.searchNext();
+          }
         }
       });
       this.searchBar = searchBar;
       this.searchInput = searchInput;
+      this.matchCountEl = matchCount;
       const sandbox = this.plugin.settings.enableScripts ? this.plugin.settings.sandboxPermissions : "allow-same-origin";
       this.iframe = this.mainView.createEl("iframe", {
         cls: "html-experience-iframe",
@@ -301,6 +332,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     }
     if (!visible) {
       this.clearSearch();
+      if (this.matchCountEl) this.matchCountEl.textContent = "";
     }
   }
   applyZoom() {
@@ -360,15 +392,86 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     if (!((_a = this.iframe) == null ? void 0 : _a.contentDocument) || !query) return;
     this.clearSearch();
     const body = this.iframe.contentDocument.body;
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`(${escapedQuery})`, "gi");
+    const textNodes = [];
     const walker = this.iframe.contentDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
     while (walker.nextNode()) {
       const node = walker.currentNode;
       if (((_b = node.parentElement) == null ? void 0 : _b.tagName) === "SCRIPT" || ((_c = node.parentElement) == null ? void 0 : _c.tagName) === "STYLE") continue;
-      if (regex.test(node.textContent || "")) {
-        const span = this.iframe.contentDocument.createElement("span");
-        span.innerHTML = (node.textContent || "").replace(regex, `<mark style="background: yellow; color: black;">$1</mark>`);
-        (_d = node.parentElement) == null ? void 0 : _d.replaceChild(span, node);
+      if (node.textContent && regex.test(node.textContent)) {
+        textNodes.push(node);
+      }
+      regex.lastIndex = 0;
+    }
+    let count = 0;
+    for (const node of textNodes) {
+      const text = node.textContent || "";
+      const parts = text.split(new RegExp(escapedQuery, "gi"));
+      if (parts.length <= 1) continue;
+      const parent = node.parentNode;
+      if (!parent) continue;
+      const fragment = this.iframe.contentDocument.createDocumentFragment();
+      const lowerText = text.toLowerCase();
+      let searchIndex = 0;
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i]) {
+          fragment.appendChild(this.iframe.contentDocument.createTextNode(parts[i]));
+        }
+        if (i < parts.length - 1) {
+          const matchText = ((_d = text.substring(searchIndex + parts[i].length).match(new RegExp(`^${escapedQuery}`, "i"))) == null ? void 0 : _d[0]) || "";
+          searchIndex += parts[i].length + matchText.length;
+          const mark = this.iframe.contentDocument.createElement("mark");
+          mark.setAttribute("data-match", String(count));
+          mark.style.background = "yellow";
+          mark.style.color = "black";
+          mark.textContent = matchText || query;
+          fragment.appendChild(mark);
+          count++;
+        }
+      }
+      parent.replaceChild(fragment, node);
+    }
+    this.totalMatches = count;
+    this.currentMatch = count > 0 ? 1 : 0;
+    this.updateMatchCount();
+    if (count > 0) this.highlightCurrentMatch();
+  }
+  searchNext() {
+    if (this.totalMatches === 0) return;
+    this.currentMatch = this.currentMatch >= this.totalMatches ? 1 : this.currentMatch + 1;
+    this.highlightCurrentMatch();
+  }
+  searchPrevious() {
+    if (this.totalMatches === 0) return;
+    this.currentMatch = this.currentMatch <= 1 ? this.totalMatches : this.currentMatch - 1;
+    this.highlightCurrentMatch();
+  }
+  highlightCurrentMatch() {
+    var _a;
+    if (!((_a = this.iframe) == null ? void 0 : _a.contentDocument)) return;
+    const marks = this.iframe.contentDocument.querySelectorAll("mark");
+    marks.forEach((mark) => {
+      mark.style.background = "yellow";
+      mark.style.outline = "none";
+    });
+    const current = this.iframe.contentDocument.querySelector(`mark[data-match="${this.currentMatch - 1}"]`);
+    if (current) {
+      current.style.background = "#ff6b6b";
+      current.style.outline = "2px solid #ff0000";
+      current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    this.updateMatchCount();
+  }
+  updateMatchCount() {
+    var _a;
+    if (this.matchCountEl) {
+      if (this.totalMatches > 0) {
+        this.matchCountEl.textContent = `${this.currentMatch}/${this.totalMatches}`;
+      } else if ((_a = this.searchInput) == null ? void 0 : _a.value) {
+        this.matchCountEl.textContent = "No matches";
+      } else {
+        this.matchCountEl.textContent = "";
       }
     }
   }
@@ -534,6 +637,30 @@ var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
         const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
         if (view) {
           if (!checking) view.toggleSearchBar();
+          return true;
+        }
+        return false;
+      }
+    });
+    this.addCommand({
+      id: "search-next",
+      name: "Search next match",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+        if (view) {
+          if (!checking) view.searchNext();
+          return true;
+        }
+        return false;
+      }
+    });
+    this.addCommand({
+      id: "search-previous",
+      name: "Search previous match",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+        if (view) {
+          if (!checking) view.searchPrevious();
           return true;
         }
         return false;

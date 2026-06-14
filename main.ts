@@ -30,6 +30,9 @@ class HTMLExperienceView extends FileView {
 	mainView: HTMLDivElement | null = null;
 	searchBar: HTMLDivElement | null = null;
 	searchInput: HTMLInputElement | null = null;
+	matchCountEl: HTMLSpanElement | null = null;
+	currentMatch: number = 0;
+	totalMatches: number = 0;
 	zoomLevel: number = 1;
 	forceDark: boolean = false;
 	_messageHandler: ((evt: MessageEvent) => void) | null = null;
@@ -80,12 +83,21 @@ class HTMLExperienceView extends FileView {
 			attr: { type: "text", placeholder: "Search..." },
 		});
 		searchInput.setAttribute("style", "padding: 2px 6px; width: 200px;");
-		searchBar.createEl("button", { text: "Find" }).addEventListener("click", () => this.searchInIframe(searchInput.value));
-		searchBar.createEl("button", { text: "Clear" }).addEventListener("click", () => {
+		const matchCount = searchBar.createEl("span", { text: "" });
+		matchCount.setAttribute("style", "font-size: 12px; color: var(--text-muted); min-width: 50px;");
+		const prevBtn = searchBar.createEl("button", { text: "\u25B2" });
+		prevBtn.addEventListener("click", (e) => { e.stopPropagation(); this.searchPrevious(); searchInput.focus(); });
+		const nextBtn = searchBar.createEl("button", { text: "\u25BC" });
+		nextBtn.addEventListener("click", (e) => { e.stopPropagation(); this.searchNext(); searchInput.focus(); });
+		searchBar.createEl("button", { text: "Clear" }).addEventListener("click", (e) => {
+			e.stopPropagation();
 			searchInput.value = "";
 			this.clearSearch();
+			matchCount.textContent = "";
+			searchInput.focus();
 		});
-		searchBar.createEl("button", { text: "x" }).addEventListener("click", () => this.toggleSearchBar(false));
+		const closeBtn = searchBar.createEl("button", { text: "x" });
+		closeBtn.addEventListener("click", (e) => { e.stopPropagation(); this.toggleSearchBar(false); });
 
 		searchInput.addEventListener("input", () => {
 			if (searchInput.value) {
@@ -98,11 +110,19 @@ class HTMLExperienceView extends FileView {
 		searchInput.addEventListener("keydown", (evt: KeyboardEvent) => {
 			if (evt.key === "Escape") {
 				this.toggleSearchBar(false);
+			} else if (evt.key === "Enter") {
+				evt.preventDefault();
+				if (evt.shiftKey) {
+					this.searchPrevious();
+				} else {
+					this.searchNext();
+				}
 			}
 		});
 
 		this.searchBar = searchBar;
 		this.searchInput = searchInput;
+		this.matchCountEl = matchCount;
 
 		const sandbox = this.plugin.settings.enableScripts
 			? this.plugin.settings.sandboxPermissions
@@ -325,6 +345,7 @@ class HTMLExperienceView extends FileView {
 		}
 		if (!visible) {
 			this.clearSearch();
+			if (this.matchCountEl) this.matchCountEl.textContent = "";
 		}
 	}
 
@@ -385,15 +406,94 @@ class HTMLExperienceView extends FileView {
 		if (!this.iframe?.contentDocument || !query) return;
 		this.clearSearch();
 		const body = this.iframe.contentDocument.body;
+		const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const regex = new RegExp(`(${escapedQuery})`, "gi");
+
+		const textNodes: Text[] = [];
 		const walker = this.iframe.contentDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-		const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
 		while (walker.nextNode()) {
-			const node = walker.currentNode;
+			const node = walker.currentNode as Text;
 			if (node.parentElement?.tagName === "SCRIPT" || node.parentElement?.tagName === "STYLE") continue;
-			if (regex.test(node.textContent || "")) {
-				const span = this.iframe.contentDocument.createElement("span");
-				span.innerHTML = (node.textContent || "").replace(regex, `<mark style="background: yellow; color: black;">$1</mark>`);
-				node.parentElement?.replaceChild(span, node);
+			if (node.textContent && regex.test(node.textContent)) {
+				textNodes.push(node);
+			}
+			regex.lastIndex = 0;
+		}
+
+		let count = 0;
+		for (const node of textNodes) {
+			const text = node.textContent || "";
+			const parts = text.split(new RegExp(escapedQuery, "gi"));
+			if (parts.length <= 1) continue;
+
+			const parent = node.parentNode;
+			if (!parent) continue;
+
+			const fragment = this.iframe.contentDocument.createDocumentFragment();
+			const lowerText = text.toLowerCase();
+			let searchIndex = 0;
+
+			for (let i = 0; i < parts.length; i++) {
+				if (parts[i]) {
+					fragment.appendChild(this.iframe.contentDocument.createTextNode(parts[i]));
+				}
+				if (i < parts.length - 1) {
+					const matchText = text.substring(searchIndex + parts[i].length).match(new RegExp(`^${escapedQuery}`, "i"))?.[0] || "";
+					searchIndex += parts[i].length + matchText.length;
+					const mark = this.iframe.contentDocument.createElement("mark");
+					mark.setAttribute("data-match", String(count));
+					mark.style.background = "yellow";
+					mark.style.color = "black";
+					mark.textContent = matchText || query;
+					fragment.appendChild(mark);
+					count++;
+				}
+			}
+			parent.replaceChild(fragment, node);
+		}
+
+		this.totalMatches = count;
+		this.currentMatch = count > 0 ? 1 : 0;
+		this.updateMatchCount();
+		if (count > 0) this.highlightCurrentMatch();
+	}
+
+	searchNext(): void {
+		if (this.totalMatches === 0) return;
+		this.currentMatch = this.currentMatch >= this.totalMatches ? 1 : this.currentMatch + 1;
+		this.highlightCurrentMatch();
+	}
+
+	searchPrevious(): void {
+		if (this.totalMatches === 0) return;
+		this.currentMatch = this.currentMatch <= 1 ? this.totalMatches : this.currentMatch - 1;
+		this.highlightCurrentMatch();
+	}
+
+	highlightCurrentMatch(): void {
+		if (!this.iframe?.contentDocument) return;
+		const marks = this.iframe.contentDocument.querySelectorAll("mark");
+		marks.forEach((mark) => {
+			mark.style.background = "yellow";
+			mark.style.outline = "none";
+		});
+		const current = this.iframe.contentDocument.querySelector(`mark[data-match="${this.currentMatch - 1}"]`) as HTMLElement;
+		if (current) {
+			current.style.background = "#ff6b6b";
+			current.style.outline = "2px solid #ff0000";
+			current.scrollIntoView({ behavior: "smooth", block: "center" });
+		}
+		this.updateMatchCount();
+	}
+
+	updateMatchCount(): void {
+		if (this.matchCountEl) {
+			if (this.totalMatches > 0) {
+				this.matchCountEl.textContent = `${this.currentMatch}/${this.totalMatches}`;
+			} else if (this.searchInput?.value) {
+				this.matchCountEl.textContent = "No matches";
+			} else {
+				this.matchCountEl.textContent = "";
 			}
 		}
 	}
@@ -611,6 +711,32 @@ export default class HTMLExperiencePlugin extends Plugin {
 				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
 				if (view) {
 					if (!checking) view.toggleSearchBar();
+					return true;
+				}
+				return false;
+			},
+		});
+
+		this.addCommand({
+			id: "search-next",
+			name: "Search next match",
+			checkCallback: (checking: boolean) => {
+				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+				if (view) {
+					if (!checking) view.searchNext();
+					return true;
+				}
+				return false;
+			},
+		});
+
+		this.addCommand({
+			id: "search-previous",
+			name: "Search previous match",
+			checkCallback: (checking: boolean) => {
+				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+				if (view) {
+					if (!checking) view.searchPrevious();
 					return true;
 				}
 				return false;

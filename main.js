@@ -29,9 +29,16 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var VIEW_TYPE_HTML_EXPERIENCE = "html-experience-view";
+var DEFAULT_SETTINGS = {
+  enableScripts: true,
+  sandboxPermissions: "allow-scripts allow-same-origin allow-forms allow-popups allow-modals",
+  backgroundColor: "#ffffff",
+  backgroundColorEnabled: false
+};
 var HTMLExperienceView = class extends import_obsidian.FileView {
-  constructor(leaf) {
+  constructor(leaf, plugin) {
     super(leaf);
+    this.plugin = plugin;
   }
   getViewType() {
     return VIEW_TYPE_HTML_EXPERIENCE;
@@ -49,11 +56,10 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     const htmlStr = decoder.decode(contents);
     const mainView = this.contentEl.createDiv();
     mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0;");
+    const sandbox = this.plugin.settings.enableScripts ? this.plugin.settings.sandboxPermissions : "allow-same-origin";
     const iframe = mainView.createEl("iframe", {
       cls: "html-experience-iframe",
-      attr: {
-        sandbox: "allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-      }
+      attr: { sandbox }
     });
     const baseHref = this.app.vault.getResourcePath(file);
     const doc = new DOMParser().parseFromString(htmlStr, "text/html");
@@ -63,16 +69,85 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       doc.head.prepend(baseElm);
     }
     baseElm.setAttribute("href", baseHref);
+    if (this.plugin.settings.backgroundColorEnabled) {
+      const body = doc.querySelector("body");
+      if (body) {
+        body.style.backgroundColor = this.plugin.settings.backgroundColor;
+      }
+    }
     iframe.srcdoc = doc.documentElement.outerHTML;
   }
   canRenameExtension(extension) {
     return false;
   }
 };
+var HTMLExperienceSettingTab = class extends import_obsidian.PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl("h2", { text: "HTML Experience Settings" });
+    new import_obsidian.Setting(containerEl).setName("Enable JavaScript").setDesc("Allow scripts to run in HTML files. Disable for untrusted content.").addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.enableScripts).onChange(async (value) => {
+        this.plugin.settings.enableScripts = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Sandbox permissions").setDesc("Space-separated list of iframe sandbox permissions.").addText(
+      (text) => text.setPlaceholder("allow-scripts allow-same-origin...").setValue(this.plugin.settings.sandboxPermissions).onChange(async (value) => {
+        this.plugin.settings.sandboxPermissions = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Background color").setDesc("Set a custom background color for HTML files.").addColorPicker(
+      (picker) => picker.setValue(this.plugin.settings.backgroundColor).onChange(async (value) => {
+        this.plugin.settings.backgroundColor = value;
+        await this.plugin.saveSettings();
+      })
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.backgroundColorEnabled).onChange(async (value) => {
+        this.plugin.settings.backgroundColorEnabled = value;
+        await this.plugin.saveSettings();
+      })
+    );
+    containerEl.createEl("h3", { text: "Actions" });
+    new import_obsidian.Setting(containerEl).setName("Reload active view").setDesc("Refresh the currently open HTML file to apply new settings.").addButton(
+      (btn) => btn.setButtonText("Reload").onClick(async () => {
+        this.plugin.reloadActiveView();
+      })
+    );
+  }
+};
 var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
+  constructor() {
+    super(...arguments);
+    this.settings = DEFAULT_SETTINGS;
+  }
   async onload() {
-    this.registerView(VIEW_TYPE_HTML_EXPERIENCE, (leaf) => new HTMLExperienceView(leaf));
+    await this.loadSettings();
+    this.registerView(VIEW_TYPE_HTML_EXPERIENCE, (leaf) => new HTMLExperienceView(leaf, this));
     this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML_EXPERIENCE);
+    this.addCommand({
+      id: "reload-html-view",
+      name: "Reload active HTML view",
+      callback: () => this.reloadActiveView()
+    });
+    this.addSettingTab(new HTMLExperienceSettingTab(this.app, this));
+  }
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+  reloadActiveView() {
+    const activeView = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+    if (activeView && activeView.file) {
+      activeView.onLoadFile(activeView.file);
+    }
   }
   async onunload() {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_HTML_EXPERIENCE);

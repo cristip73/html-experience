@@ -72,22 +72,18 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       if (file.extension === "mht" || file.extension === "mhtml") {
         htmlStr = this.parseMhtml(htmlStr);
       }
-      this.mainView = this.contentEl.createDiv();
-      this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden; position: relative;");
-      const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
-      toolbar.setAttribute("style", "display: " + (this.plugin.settings.showNavbar ? "flex" : "none") + "; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+      this.mainView = this.contentEl.createDiv({ cls: "html-experience-main" });
+      const toolbar = this.contentEl.createDiv({ cls: this.plugin.settings.showNavbar ? "html-experience-toolbar" : "html-experience-toolbar html-experience-toolbar-hidden" });
       toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
       toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
       toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
       toolbar.createEl("button", { text: "\u26F6" }).addEventListener("click", () => this.toggleFullscreen());
       const searchBar = this.contentEl.createDiv({ cls: "html-experience-search-bar" });
-      searchBar.setAttribute("style", "display: none; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
       const searchInput = searchBar.createEl("input", {
+        cls: "html-experience-search-input",
         attr: { type: "text", placeholder: "Search..." }
       });
-      searchInput.setAttribute("style", "padding: 2px 6px; width: 200px;");
-      const matchCount = searchBar.createEl("span", { text: "" });
-      matchCount.setAttribute("style", "font-size: 12px; color: var(--text-muted); min-width: 50px;");
+      const matchCount = searchBar.createEl("span", { cls: "html-experience-match-count" });
       const prevBtn = searchBar.createEl("button", { text: "\u25B2" });
       prevBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -141,15 +137,14 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       });
       if (this.plugin.settings.showThemeButton) {
         const isCurrentlyDark = this.forceDark || document.body.classList.contains("theme-dark");
-        const themeBtn = this.mainView.createEl("button", { text: isCurrentlyDark ? "\u2600" : "\u263E" });
-        const btnBg = isCurrentlyDark ? "#2a2a2a" : "#f0f0f0";
-        const btnColor = isCurrentlyDark ? "#f0c040" : "#1a1a1a";
-        themeBtn.setAttribute("style", "position: absolute; bottom: 16px; left: 16px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--background-modifier-border); background: " + btnBg + "; color: " + btnColor + "; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 50; transition: all 0.2s;");
+        const themeBtn = this.mainView.createEl("button", {
+          cls: `html-experience-theme-btn ${isCurrentlyDark ? "html-experience-theme-btn-dark" : "html-experience-theme-btn-light"}`,
+          text: isCurrentlyDark ? "\u2600" : "\u263E"
+        });
         themeBtn.addEventListener("click", () => {
           this.forceDark = !this.forceDark;
           themeBtn.textContent = this.forceDark ? "\u2600" : "\u263E";
-          themeBtn.style.background = this.forceDark ? "#2a2a2a" : "#f0f0f0";
-          themeBtn.style.color = this.forceDark ? "#f0c040" : "#1a1a1a";
+          themeBtn.className = `html-experience-theme-btn ${this.forceDark ? "html-experience-theme-btn-dark" : "html-experience-theme-btn-light"}`;
           this.toggleThemeStyles(this.forceDark);
         });
       }
@@ -167,71 +162,77 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
           body.style.backgroundColor = this.plugin.settings.backgroundColor;
         }
       }
+      const searchStyle = doc.createElement("style");
+      searchStyle.id = "html-experience-search-styles";
+      searchStyle.textContent = `
+				mark.html-experience-search-mark { background: yellow !important; color: black !important; }
+				mark.html-experience-search-mark-current { background: #ff6b6b !important; outline: 2px solid #ff0000 !important; }
+			`;
+      doc.head.appendChild(searchStyle);
       const isDark = this.forceDark || !this.forceDark && document.body.classList.contains("theme-dark");
       const hasCustomBg = this.plugin.settings.backgroundColorEnabled;
       const themeDisabled = this.plugin.settings.disableTheme;
-      if (!themeDisabled && isDark) {
+      if (!themeDisabled) {
         const style = doc.createElement("style");
-        style.textContent = `
-				${hasCustomBg ? "" : "body, html { background-color: #1e1e1e !important; }"}
-				*, *::before, *::after { color: #d4d4d4 !important; border-color: #444 !important; background-color: transparent !important; }
-				a { color: #4fc1ff !important; }
-				h1, h2, h3, h4, h5, h6 { color: #e0e0e0 !important; }
-				p, span, li, td, th, div, section, article, main, header, footer, nav, aside, label, caption, dt, dd { color: #d4d4d4 !important; }
-				code, pre, kbd, samp { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
-				input, textarea, select, button { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
-				table { border-color: #444 !important; }
-				th { background-color: #2a2a2a !important; }
-				tr:nth-child(even) { background-color: #252525 !important; }
-				blockquote { border-left-color: #4fc1ff !important; color: #b0b0b0 !important; background-color: #2a2a2a !important; }
-				hr { border-color: #444 !important; }
-				svg { fill: #d4d4d4 !important; }
-				img { opacity: 0.9; }
-				.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #2a2a2a !important; border-color: #444 !important; }
-				ol, ul { padding-left: 20px; }
-				li { margin-bottom: 4px; }
-			`;
-        doc.head.appendChild(style);
-      } else if (!themeDisabled && this.forceDark === false) {
-        const style = doc.createElement("style");
-        style.textContent = `
-				${hasCustomBg ? "" : "body, html { background-color: #ffffff !important; }"}
-				*, *::before, *::after { color: #1a1a1a !important; background-color: transparent !important; }
-				a { color: #0066cc !important; }
-				code, pre, kbd, samp { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
-				input, textarea, select, button { background-color: #ffffff !important; color: #1a1a1a !important; border-color: #ccc !important; }
-				th { background-color: #f0f0f0 !important; }
-				blockquote { border-left-color: #0066cc !important; background-color: #f9f9f9 !important; }
-				svg { fill: #1a1a1a !important; }
-				.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #f5f5f5 !important; border-color: #ddd !important; }
-			`;
+        style.id = "html-experience-theme";
+        if (isDark) {
+          style.textContent = `
+						${hasCustomBg ? "" : "body, html { background-color: #1e1e1e !important; }"}
+						*, *::before, *::after { color: #d4d4d4 !important; border-color: #444 !important; background-color: transparent !important; }
+						a { color: #4fc1ff !important; }
+						h1, h2, h3, h4, h5, h6 { color: #e0e0e0 !important; }
+						p, span, li, td, th, div, section, article, main, header, footer, nav, aside, label, caption, dt, dd { color: #d4d4d4 !important; }
+						code, pre, kbd, samp { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
+						input, textarea, select, button { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
+						table { border-color: #444 !important; }
+						th { background-color: #2a2a2a !important; }
+						tr:nth-child(even) { background-color: #252525 !important; }
+						blockquote { border-left-color: #4fc1ff !important; color: #b0b0b0 !important; background-color: #2a2a2a !important; }
+						hr { border-color: #444 !important; }
+						svg { fill: #d4d4d4 !important; }
+						img { opacity: 0.9; }
+						.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #2a2a2a !important; border-color: #444 !important; }
+					`;
+        } else {
+          style.textContent = `
+						${hasCustomBg ? "" : "body, html { background-color: #ffffff !important; }"}
+						*, *::before, *::after { color: #1a1a1a !important; background-color: transparent !important; }
+						a { color: #0066cc !important; }
+						code, pre, kbd, samp { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
+						input, textarea, select, button { background-color: #ffffff !important; color: #1a1a1a !important; border-color: #ccc !important; }
+						th { background-color: #f0f0f0 !important; }
+						blockquote { border-left-color: #0066cc !important; background-color: #f9f9f9 !important; }
+						svg { fill: #1a1a1a !important; }
+						.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #f5f5f5 !important; border-color: #ddd !important; }
+					`;
+        }
         doc.head.appendChild(style);
       }
       const zoomScript = doc.createElement("script");
       zoomScript.textContent = `
-			document.addEventListener("wheel", function(evt) {
-				if (evt.ctrlKey) {
-					evt.preventDefault();
-					window.parent.postMessage({ type: "html-experience-zoom", deltaY: evt.deltaY }, "*");
-				}
-			}, { passive: false });
-			document.addEventListener("keydown", function(evt) {
-				if (evt.ctrlKey && evt.key === "f") {
-					evt.preventDefault();
-					window.parent.postMessage({ type: "html-experience-toggle-search" }, "*");
-				}
-			});
-			document.addEventListener("click", function(evt) {
-				var link = evt.target.closest("a");
-				if (link && link.href) {
-					var href = link.href;
-					if (href.startsWith("http://") || href.startsWith("https://")) {
+				document.addEventListener("wheel", function(evt) {
+					if (evt.ctrlKey) {
 						evt.preventDefault();
-						window.parent.postMessage({ type: "html-experience-open-link", url: href }, "*");
+						window.parent.postMessage({ type: "html-experience-zoom", deltaY: evt.deltaY }, "*");
 					}
-				}
-			});
-		`;
+				}, { passive: false });
+				document.addEventListener("keydown", function(evt) {
+					if (evt.ctrlKey && evt.key === "f") {
+						evt.preventDefault();
+						window.parent.postMessage({ type: "html-experience-toggle-search" }, "*");
+					}
+				});
+				document.addEventListener("click", function(evt) {
+					var link = evt.target.closest("a");
+					if (link && link.href) {
+						var href = link.href;
+						if (href.startsWith("http://") || href.startsWith("https://")) {
+							evt.preventDefault();
+							window.parent.postMessage({ type: "html-experience-open-link", url: href }, "*");
+						}
+					}
+				});
+			`;
       doc.body.appendChild(zoomScript);
       this.iframe.srcdoc = doc.documentElement.outerHTML;
       this.iframe.addEventListener("wheel", (evt) => {
@@ -267,8 +268,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       });
     } catch (error) {
       this.contentEl.empty();
-      const errorDiv = this.contentEl.createDiv();
-      errorDiv.setAttribute("style", "padding: 20px; color: var(--text-error);");
+      const errorDiv = this.contentEl.createDiv({ cls: "html-experience-error" });
       errorDiv.createEl("h3", { text: "Failed to load HTML file" });
       errorDiv.createEl("p", { text: error instanceof Error ? error.message : String(error) });
       errorDiv.createEl("p", { text: "Try reloading or check if the file is valid HTML." });
@@ -324,8 +324,8 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
   }
   toggleSearchBar(forceState) {
     if (!this.searchBar) return;
-    const visible = forceState != null ? forceState : this.searchBar.style.display === "none";
-    this.searchBar.style.display = visible ? "flex" : "none";
+    const visible = forceState != null ? forceState : !this.searchBar.classList.contains("html-experience-search-bar-visible");
+    this.searchBar.classList.toggle("html-experience-search-bar-visible", visible);
     if (visible && this.searchInput) {
       this.searchInput.focus();
       this.searchInput.select();
@@ -412,7 +412,6 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       const parent = node.parentNode;
       if (!parent) continue;
       const fragment = this.iframe.contentDocument.createDocumentFragment();
-      const lowerText = text.toLowerCase();
       let searchIndex = 0;
       for (let i = 0; i < parts.length; i++) {
         if (parts[i]) {
@@ -423,8 +422,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
           searchIndex += parts[i].length + matchText.length;
           const mark = this.iframe.contentDocument.createElement("mark");
           mark.setAttribute("data-match", String(count));
-          mark.style.background = "yellow";
-          mark.style.color = "black";
+          mark.classList.add("html-experience-search-mark");
           mark.textContent = matchText || query;
           fragment.appendChild(mark);
           count++;
@@ -452,13 +450,13 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     if (!((_a = this.iframe) == null ? void 0 : _a.contentDocument)) return;
     const marks = this.iframe.contentDocument.querySelectorAll("mark");
     marks.forEach((mark) => {
-      mark.style.background = "yellow";
-      mark.style.outline = "none";
+      mark.classList.remove("html-experience-search-mark-current");
+      mark.classList.add("html-experience-search-mark");
     });
     const current = this.iframe.contentDocument.querySelector(`mark[data-match="${this.currentMatch - 1}"]`);
     if (current) {
-      current.style.background = "#ff6b6b";
-      current.style.outline = "2px solid #ff0000";
+      current.classList.remove("html-experience-search-mark");
+      current.classList.add("html-experience-search-mark-current");
       current.scrollIntoView({ behavior: "smooth", block: "center" });
     }
     this.updateMatchCount();
@@ -505,7 +503,6 @@ var HTMLExperienceSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "HTML Experience Settings" });
     new import_obsidian.Setting(containerEl).setName("Enable JavaScript").setDesc("When ON, scripts in HTML files will run. Turn OFF for safer viewing of untrusted files.").addToggle(
       (toggle) => toggle.setValue(this.plugin.settings.enableScripts).onChange(async (value) => {
         this.plugin.settings.enableScripts = value;
@@ -553,7 +550,6 @@ var HTMLExperienceSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    containerEl.createEl("h3", { text: "Actions" });
     new import_obsidian.Setting(containerEl).setName("Reload active view").setDesc("Refresh the currently open HTML file to apply new settings.").addButton(
       (btn) => btn.setButtonText("Reload").onClick(async () => {
         this.plugin.reloadActiveView();
@@ -690,6 +686,5 @@ var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
     }
   }
   async onunload() {
-    this.app.workspace.detachLeavesOfType(VIEW_TYPE_HTML_EXPERIENCE);
   }
 };

@@ -66,211 +66,212 @@ class HTMLExperienceView extends FileView {
 				htmlStr = this.parseMhtml(htmlStr);
 			}
 
-		this.mainView = this.contentEl.createDiv();
-		this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden; position: relative;");
+			this.mainView = this.contentEl.createDiv({ cls: "html-experience-main" });
 
-		const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
-		toolbar.setAttribute("style", "display: " + (this.plugin.settings.showNavbar ? "flex" : "none") + "; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+			const toolbar = this.contentEl.createDiv({ cls: this.plugin.settings.showNavbar ? "html-experience-toolbar" : "html-experience-toolbar html-experience-toolbar-hidden" });
 
-		toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
-		toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
-		toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
-		toolbar.createEl("button", { text: "\u26F6" }).addEventListener("click", () => this.toggleFullscreen());
+			toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
+			toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
+			toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
+			toolbar.createEl("button", { text: "\u26F6" }).addEventListener("click", () => this.toggleFullscreen());
 
-		const searchBar = this.contentEl.createDiv({ cls: "html-experience-search-bar" });
-		searchBar.setAttribute("style", "display: none; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
-		const searchInput = searchBar.createEl("input", {
-			attr: { type: "text", placeholder: "Search..." },
-		});
-		searchInput.setAttribute("style", "padding: 2px 6px; width: 200px;");
-		const matchCount = searchBar.createEl("span", { text: "" });
-		matchCount.setAttribute("style", "font-size: 12px; color: var(--text-muted); min-width: 50px;");
-		const prevBtn = searchBar.createEl("button", { text: "\u25B2" });
-		prevBtn.addEventListener("click", (e) => { e.stopPropagation(); this.searchPrevious(); searchInput.focus(); });
-		const nextBtn = searchBar.createEl("button", { text: "\u25BC" });
-		nextBtn.addEventListener("click", (e) => { e.stopPropagation(); this.searchNext(); searchInput.focus(); });
-		searchBar.createEl("button", { text: "Clear" }).addEventListener("click", (e) => {
-			e.stopPropagation();
-			searchInput.value = "";
-			this.clearSearch();
-			matchCount.textContent = "";
-			searchInput.focus();
-		});
-		const closeBtn = searchBar.createEl("button", { text: "x" });
-		closeBtn.addEventListener("click", (e) => { e.stopPropagation(); this.toggleSearchBar(false); });
-
-		searchInput.addEventListener("input", () => {
-			if (searchInput.value) {
-				this.searchInIframe(searchInput.value);
-			} else {
+			const searchBar = this.contentEl.createDiv({ cls: "html-experience-search-bar" });
+			const searchInput = searchBar.createEl("input", {
+				cls: "html-experience-search-input",
+				attr: { type: "text", placeholder: "Search..." },
+			});
+			const matchCount = searchBar.createEl("span", { cls: "html-experience-match-count" });
+			const prevBtn = searchBar.createEl("button", { text: "\u25B2" });
+			prevBtn.addEventListener("click", (e) => { e.stopPropagation(); this.searchPrevious(); searchInput.focus(); });
+			const nextBtn = searchBar.createEl("button", { text: "\u25BC" });
+			nextBtn.addEventListener("click", (e) => { e.stopPropagation(); this.searchNext(); searchInput.focus(); });
+			searchBar.createEl("button", { text: "Clear" }).addEventListener("click", (e) => {
+				e.stopPropagation();
+				searchInput.value = "";
 				this.clearSearch();
-			}
-		});
+				matchCount.textContent = "";
+				searchInput.focus();
+			});
+			const closeBtn = searchBar.createEl("button", { text: "x" });
+			closeBtn.addEventListener("click", (e) => { e.stopPropagation(); this.toggleSearchBar(false); });
 
-		searchInput.addEventListener("keydown", (evt: KeyboardEvent) => {
-			if (evt.key === "Escape") {
-				this.toggleSearchBar(false);
-			} else if (evt.key === "Enter") {
-				evt.preventDefault();
-				if (evt.shiftKey) {
-					this.searchPrevious();
+			searchInput.addEventListener("input", () => {
+				if (searchInput.value) {
+					this.searchInIframe(searchInput.value);
 				} else {
-					this.searchNext();
-				}
-			}
-		});
-
-		this.searchBar = searchBar;
-		this.searchInput = searchInput;
-		this.matchCountEl = matchCount;
-
-		const sandbox = this.plugin.settings.enableScripts
-			? this.plugin.settings.sandboxPermissions
-			: "allow-same-origin";
-
-		this.iframe = this.mainView.createEl("iframe", {
-			cls: "html-experience-iframe",
-			attr: { sandbox },
-		});
-
-		if (this.plugin.settings.showThemeButton) {
-			const isCurrentlyDark = this.forceDark || document.body.classList.contains("theme-dark");
-			const themeBtn = this.mainView.createEl("button", { text: isCurrentlyDark ? "\u2600" : "\u263E" });
-			const btnBg = isCurrentlyDark ? "#2a2a2a" : "#f0f0f0";
-			const btnColor = isCurrentlyDark ? "#f0c040" : "#1a1a1a";
-			themeBtn.setAttribute("style", "position: absolute; bottom: 16px; left: 16px; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--background-modifier-border); background: " + btnBg + "; color: " + btnColor + "; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 50; transition: all 0.2s;");
-			themeBtn.addEventListener("click", () => {
-				this.forceDark = !this.forceDark;
-				themeBtn.textContent = this.forceDark ? "\u2600" : "\u263E";
-				themeBtn.style.background = this.forceDark ? "#2a2a2a" : "#f0f0f0";
-				themeBtn.style.color = this.forceDark ? "#f0c040" : "#1a1a1a";
-				this.toggleThemeStyles(this.forceDark);
-			});
-		}
-
-		const baseHref = this.app.vault.getResourcePath(file);
-		const doc = new DOMParser().parseFromString(htmlStr, "text/html");
-
-		let baseElm = doc.querySelector("base");
-		if (!baseElm) {
-			baseElm = doc.createElement("base");
-			doc.head.prepend(baseElm);
-		}
-		baseElm.setAttribute("href", baseHref);
-
-		if (this.plugin.settings.backgroundColorEnabled) {
-			const body = doc.querySelector("body");
-			if (body) {
-				body.style.backgroundColor = this.plugin.settings.backgroundColor;
-			}
-		}
-
-		const isDark = this.forceDark || (!this.forceDark && document.body.classList.contains("theme-dark"));
-		const hasCustomBg = this.plugin.settings.backgroundColorEnabled;
-		const themeDisabled = this.plugin.settings.disableTheme;
-		if (!themeDisabled && isDark) {
-			const style = doc.createElement("style");
-			style.textContent = `
-				${hasCustomBg ? "" : "body, html { background-color: #1e1e1e !important; }"}
-				*, *::before, *::after { color: #d4d4d4 !important; border-color: #444 !important; background-color: transparent !important; }
-				a { color: #4fc1ff !important; }
-				h1, h2, h3, h4, h5, h6 { color: #e0e0e0 !important; }
-				p, span, li, td, th, div, section, article, main, header, footer, nav, aside, label, caption, dt, dd { color: #d4d4d4 !important; }
-				code, pre, kbd, samp { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
-				input, textarea, select, button { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
-				table { border-color: #444 !important; }
-				th { background-color: #2a2a2a !important; }
-				tr:nth-child(even) { background-color: #252525 !important; }
-				blockquote { border-left-color: #4fc1ff !important; color: #b0b0b0 !important; background-color: #2a2a2a !important; }
-				hr { border-color: #444 !important; }
-				svg { fill: #d4d4d4 !important; }
-				img { opacity: 0.9; }
-				.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #2a2a2a !important; border-color: #444 !important; }
-				ol, ul { padding-left: 20px; }
-				li { margin-bottom: 4px; }
-			`;
-			doc.head.appendChild(style);
-		} else if (!themeDisabled && this.forceDark === false) {
-			const style = doc.createElement("style");
-			style.textContent = `
-				${hasCustomBg ? "" : "body, html { background-color: #ffffff !important; }"}
-				*, *::before, *::after { color: #1a1a1a !important; background-color: transparent !important; }
-				a { color: #0066cc !important; }
-				code, pre, kbd, samp { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
-				input, textarea, select, button { background-color: #ffffff !important; color: #1a1a1a !important; border-color: #ccc !important; }
-				th { background-color: #f0f0f0 !important; }
-				blockquote { border-left-color: #0066cc !important; background-color: #f9f9f9 !important; }
-				svg { fill: #1a1a1a !important; }
-				.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #f5f5f5 !important; border-color: #ddd !important; }
-			`;
-			doc.head.appendChild(style);
-		}
-
-		const zoomScript = doc.createElement("script");
-		zoomScript.textContent = `
-			document.addEventListener("wheel", function(evt) {
-				if (evt.ctrlKey) {
-					evt.preventDefault();
-					window.parent.postMessage({ type: "html-experience-zoom", deltaY: evt.deltaY }, "*");
-				}
-			}, { passive: false });
-			document.addEventListener("keydown", function(evt) {
-				if (evt.ctrlKey && evt.key === "f") {
-					evt.preventDefault();
-					window.parent.postMessage({ type: "html-experience-toggle-search" }, "*");
+					this.clearSearch();
 				}
 			});
-			document.addEventListener("click", function(evt) {
-				var link = evt.target.closest("a");
-				if (link && link.href) {
-					var href = link.href;
-					if (href.startsWith("http://") || href.startsWith("https://")) {
-						evt.preventDefault();
-						window.parent.postMessage({ type: "html-experience-open-link", url: href }, "*");
+
+			searchInput.addEventListener("keydown", (evt: KeyboardEvent) => {
+				if (evt.key === "Escape") {
+					this.toggleSearchBar(false);
+				} else if (evt.key === "Enter") {
+					evt.preventDefault();
+					if (evt.shiftKey) {
+						this.searchPrevious();
+					} else {
+						this.searchNext();
 					}
 				}
 			});
-		`;
-		doc.body.appendChild(zoomScript);
 
-		this.iframe.srcdoc = doc.documentElement.outerHTML;
+			this.searchBar = searchBar;
+			this.searchInput = searchInput;
+			this.matchCountEl = matchCount;
 
-		this.iframe.addEventListener("wheel", (evt: WheelEvent) => {
-			if (evt.ctrlKey) {
-				evt.preventDefault();
-				if (evt.deltaY < 0) {
-					this.zoomIn();
-				} else {
-					this.zoomOut();
+			const sandbox = this.plugin.settings.enableScripts
+				? this.plugin.settings.sandboxPermissions
+				: "allow-same-origin";
+
+			this.iframe = this.mainView.createEl("iframe", {
+				cls: "html-experience-iframe",
+				attr: { sandbox },
+			});
+
+			if (this.plugin.settings.showThemeButton) {
+				const isCurrentlyDark = this.forceDark || document.body.classList.contains("theme-dark");
+				const themeBtn = this.mainView.createEl("button", {
+					cls: `html-experience-theme-btn ${isCurrentlyDark ? "html-experience-theme-btn-dark" : "html-experience-theme-btn-light"}`,
+					text: isCurrentlyDark ? "\u2600" : "\u263E",
+				});
+				themeBtn.addEventListener("click", () => {
+					this.forceDark = !this.forceDark;
+					themeBtn.textContent = this.forceDark ? "\u2600" : "\u263E";
+					themeBtn.className = `html-experience-theme-btn ${this.forceDark ? "html-experience-theme-btn-dark" : "html-experience-theme-btn-light"}`;
+					this.toggleThemeStyles(this.forceDark);
+				});
+			}
+
+			const baseHref = this.app.vault.getResourcePath(file);
+			const doc = new DOMParser().parseFromString(htmlStr, "text/html");
+
+			let baseElm = doc.querySelector("base");
+			if (!baseElm) {
+				baseElm = doc.createElement("base");
+				doc.head.prepend(baseElm);
+			}
+			baseElm.setAttribute("href", baseHref);
+
+			if (this.plugin.settings.backgroundColorEnabled) {
+				const body = doc.querySelector("body");
+				if (body) {
+					body.style.backgroundColor = this.plugin.settings.backgroundColor;
 				}
 			}
-		}, { passive: false });
 
-		this._messageHandler = (evt: MessageEvent) => {
-			if (evt.data?.type === "html-experience-zoom") {
-				if (evt.data.deltaY < 0) {
-					this.zoomIn();
+			const searchStyle = doc.createElement("style");
+			searchStyle.id = "html-experience-search-styles";
+			searchStyle.textContent = `
+				mark.html-experience-search-mark { background: yellow !important; color: black !important; }
+				mark.html-experience-search-mark-current { background: #ff6b6b !important; outline: 2px solid #ff0000 !important; }
+			`;
+			doc.head.appendChild(searchStyle);
+
+			const isDark = this.forceDark || (!this.forceDark && document.body.classList.contains("theme-dark"));
+			const hasCustomBg = this.plugin.settings.backgroundColorEnabled;
+			const themeDisabled = this.plugin.settings.disableTheme;
+			if (!themeDisabled) {
+				const style = doc.createElement("style");
+				style.id = "html-experience-theme";
+				if (isDark) {
+					style.textContent = `
+						${hasCustomBg ? "" : "body, html { background-color: #1e1e1e !important; }"}
+						*, *::before, *::after { color: #d4d4d4 !important; border-color: #444 !important; background-color: transparent !important; }
+						a { color: #4fc1ff !important; }
+						h1, h2, h3, h4, h5, h6 { color: #e0e0e0 !important; }
+						p, span, li, td, th, div, section, article, main, header, footer, nav, aside, label, caption, dt, dd { color: #d4d4d4 !important; }
+						code, pre, kbd, samp { background-color: #2d2d2d !important; color: #d4d4d4 !important; }
+						input, textarea, select, button { background-color: #3c3c3c !important; color: #d4d4d4 !important; border-color: #555 !important; }
+						table { border-color: #444 !important; }
+						th { background-color: #2a2a2a !important; }
+						tr:nth-child(even) { background-color: #252525 !important; }
+						blockquote { border-left-color: #4fc1ff !important; color: #b0b0b0 !important; background-color: #2a2a2a !important; }
+						hr { border-color: #444 !important; }
+						svg { fill: #d4d4d4 !important; }
+						img { opacity: 0.9; }
+						.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #2a2a2a !important; border-color: #444 !important; }
+					`;
 				} else {
-					this.zoomOut();
+					style.textContent = `
+						${hasCustomBg ? "" : "body, html { background-color: #ffffff !important; }"}
+						*, *::before, *::after { color: #1a1a1a !important; background-color: transparent !important; }
+						a { color: #0066cc !important; }
+						code, pre, kbd, samp { background-color: #f5f5f5 !important; color: #1a1a1a !important; }
+						input, textarea, select, button { background-color: #ffffff !important; color: #1a1a1a !important; border-color: #ccc !important; }
+						th { background-color: #f0f0f0 !important; }
+						blockquote { border-left-color: #0066cc !important; background-color: #f9f9f9 !important; }
+						svg { fill: #1a1a1a !important; }
+						.card, [class*="card"], [class*="step"], [class*="rung"], [class*="item"], [class*="box"], [class*="callout"], [class*="notice"], [class*="alert"], [class*="info"], [class*="tip"] { background-color: #f5f5f5 !important; border-color: #ddd !important; }
+					`;
 				}
-			} else if (evt.data?.type === "html-experience-toggle-search") {
-				this.toggleSearchBar();
-			} else if (evt.data?.type === "html-experience-open-link") {
-				window.open(evt.data.url, "_blank");
+				doc.head.appendChild(style);
 			}
-		};
-		window.addEventListener("message", this._messageHandler);
 
-		this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
-			if (evt.ctrlKey && evt.key === "f" && this.searchBar) {
-				evt.preventDefault();
-				this.toggleSearchBar();
-			}
-		});
+			const zoomScript = doc.createElement("script");
+			zoomScript.textContent = `
+				document.addEventListener("wheel", function(evt) {
+					if (evt.ctrlKey) {
+						evt.preventDefault();
+						window.parent.postMessage({ type: "html-experience-zoom", deltaY: evt.deltaY }, "*");
+					}
+				}, { passive: false });
+				document.addEventListener("keydown", function(evt) {
+					if (evt.ctrlKey && evt.key === "f") {
+						evt.preventDefault();
+						window.parent.postMessage({ type: "html-experience-toggle-search" }, "*");
+					}
+				});
+				document.addEventListener("click", function(evt) {
+					var link = evt.target.closest("a");
+					if (link && link.href) {
+						var href = link.href;
+						if (href.startsWith("http://") || href.startsWith("https://")) {
+							evt.preventDefault();
+							window.parent.postMessage({ type: "html-experience-open-link", url: href }, "*");
+						}
+					}
+				});
+			`;
+			doc.body.appendChild(zoomScript);
+
+			this.iframe.srcdoc = doc.documentElement.outerHTML;
+
+			this.iframe.addEventListener("wheel", (evt: WheelEvent) => {
+				if (evt.ctrlKey) {
+					evt.preventDefault();
+					if (evt.deltaY < 0) {
+						this.zoomIn();
+					} else {
+						this.zoomOut();
+					}
+				}
+			}, { passive: false });
+
+			this._messageHandler = (evt: MessageEvent) => {
+				if (evt.data?.type === "html-experience-zoom") {
+					if (evt.data.deltaY < 0) {
+						this.zoomIn();
+					} else {
+						this.zoomOut();
+					}
+				} else if (evt.data?.type === "html-experience-toggle-search") {
+					this.toggleSearchBar();
+				} else if (evt.data?.type === "html-experience-open-link") {
+					window.open(evt.data.url, "_blank");
+				}
+			};
+			window.addEventListener("message", this._messageHandler);
+
+			this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
+				if (evt.ctrlKey && evt.key === "f" && this.searchBar) {
+					evt.preventDefault();
+					this.toggleSearchBar();
+				}
+			});
 		} catch (error) {
 			this.contentEl.empty();
-			const errorDiv = this.contentEl.createDiv();
-			errorDiv.setAttribute("style", "padding: 20px; color: var(--text-error);");
+			const errorDiv = this.contentEl.createDiv({ cls: "html-experience-error" });
 			errorDiv.createEl("h3", { text: "Failed to load HTML file" });
 			errorDiv.createEl("p", { text: error instanceof Error ? error.message : String(error) });
 			errorDiv.createEl("p", { text: "Try reloading or check if the file is valid HTML." });
@@ -337,8 +338,8 @@ class HTMLExperienceView extends FileView {
 
 	toggleSearchBar(forceState?: boolean): void {
 		if (!this.searchBar) return;
-		const visible = forceState ?? this.searchBar.style.display === "none";
-		this.searchBar.style.display = visible ? "flex" : "none";
+		const visible = forceState ?? !this.searchBar.classList.contains("html-experience-search-bar-visible");
+		this.searchBar.classList.toggle("html-experience-search-bar-visible", visible);
 		if (visible && this.searchInput) {
 			this.searchInput.focus();
 			this.searchInput.select();
@@ -430,7 +431,6 @@ class HTMLExperienceView extends FileView {
 			if (!parent) continue;
 
 			const fragment = this.iframe.contentDocument.createDocumentFragment();
-			const lowerText = text.toLowerCase();
 			let searchIndex = 0;
 
 			for (let i = 0; i < parts.length; i++) {
@@ -442,8 +442,7 @@ class HTMLExperienceView extends FileView {
 					searchIndex += parts[i].length + matchText.length;
 					const mark = this.iframe.contentDocument.createElement("mark");
 					mark.setAttribute("data-match", String(count));
-					mark.style.background = "yellow";
-					mark.style.color = "black";
+					mark.classList.add("html-experience-search-mark");
 					mark.textContent = matchText || query;
 					fragment.appendChild(mark);
 					count++;
@@ -474,13 +473,13 @@ class HTMLExperienceView extends FileView {
 		if (!this.iframe?.contentDocument) return;
 		const marks = this.iframe.contentDocument.querySelectorAll("mark");
 		marks.forEach((mark) => {
-			mark.style.background = "yellow";
-			mark.style.outline = "none";
+			mark.classList.remove("html-experience-search-mark-current");
+			mark.classList.add("html-experience-search-mark");
 		});
 		const current = this.iframe.contentDocument.querySelector(`mark[data-match="${this.currentMatch - 1}"]`) as HTMLElement;
 		if (current) {
-			current.style.background = "#ff6b6b";
-			current.style.outline = "2px solid #ff0000";
+			current.classList.remove("html-experience-search-mark");
+			current.classList.add("html-experience-search-mark-current");
 			current.scrollIntoView({ behavior: "smooth", block: "center" });
 		}
 		this.updateMatchCount();
@@ -533,8 +532,6 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-
-		containerEl.createEl("h2", { text: "HTML Experience Settings" });
 
 		new Setting(containerEl)
 			.setName("Enable JavaScript")
@@ -614,8 +611,6 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				})
 			);
-
-		containerEl.createEl("h3", { text: "Actions" });
 
 		new Setting(containerEl)
 			.setName("Reload active view")
@@ -772,6 +767,6 @@ export default class HTMLExperiencePlugin extends Plugin {
 	}
 
 	async onunload(): Promise<void> {
-		this.app.workspace.detachLeavesOfType(VIEW_TYPE_HTML_EXPERIENCE);
+		// Don't detach leaves - guidelines say not to
 	}
 }

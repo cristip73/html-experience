@@ -1,6 +1,15 @@
-import { FileView, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf } from "obsidian";
+import { App, FileView, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf } from "obsidian";
 
 const VIEW_TYPE_HTML_EXPERIENCE = "html-experience-view";
+
+function base64Encode(str: string): string {
+	const bytes = new TextEncoder().encode(str);
+	let binary = "";
+	for (let i = 0; i < bytes.length; i++) {
+		binary += String.fromCharCode(bytes[i]);
+	}
+	return btoa(binary);
+}
 
 interface HTMLExperienceSettings {
 	enableScripts: boolean;
@@ -129,8 +138,8 @@ class HTMLExperienceView extends FileView {
 				attr: { sandbox },
 			});
 
-			if (this.plugin.settings.showThemeButton) {
-				const isCurrentlyDark = this.forceDark || document.body.classList.contains("theme-dark");
+		if (this.plugin.settings.showThemeButton) {
+				const isCurrentlyDark = this.forceDark || activeDocument.body.classList.contains("theme-dark");
 				const themeBtn = this.mainView.createEl("button", {
 					cls: `html-experience-theme-btn ${isCurrentlyDark ? "html-experience-theme-btn-dark" : "html-experience-theme-btn-light"}`,
 					text: isCurrentlyDark ? "\u2600" : "\u263E",
@@ -168,7 +177,7 @@ class HTMLExperienceView extends FileView {
 			`;
 			doc.head.appendChild(searchStyle);
 
-			const isDark = this.forceDark || (!this.forceDark && document.body.classList.contains("theme-dark"));
+			const isDark = this.forceDark || (!this.forceDark && activeDocument.body.classList.contains("theme-dark"));
 			const hasCustomBg = this.plugin.settings.backgroundColorEnabled;
 			const themeDisabled = this.plugin.settings.disableTheme;
 			if (!themeDisabled) {
@@ -208,8 +217,8 @@ class HTMLExperienceView extends FileView {
 				doc.head.appendChild(style);
 			}
 
-			const zoomScript = doc.createElement("script");
-			zoomScript.textContent = `
+			const serializedDoc = new XMLSerializer().serializeToString(doc);
+			this.iframe.srcdoc = serializedDoc.replace("</body>", `<script>
 				document.addEventListener("wheel", function(evt) {
 					if (evt.ctrlKey) {
 						evt.preventDefault();
@@ -232,10 +241,7 @@ class HTMLExperienceView extends FileView {
 						}
 					}
 				});
-			`;
-			doc.body.appendChild(zoomScript);
-
-			this.iframe.srcdoc = new XMLSerializer().serializeToString(doc);
+			</script></body>`);
 
 			this.iframe.addEventListener("wheel", (evt: WheelEvent) => {
 				if (evt.ctrlKey) {
@@ -249,21 +255,22 @@ class HTMLExperienceView extends FileView {
 			}, { passive: false });
 
 			this._messageHandler = (evt: MessageEvent) => {
-				if (evt.data?.type === "html-experience-zoom") {
-					if (evt.data.deltaY < 0) {
+				const data: { type: string; deltaY?: number; url?: string } = evt.data;
+				if (data.type === "html-experience-zoom") {
+					if ((data.deltaY ?? 0) < 0) {
 						this.zoomIn();
 					} else {
 						this.zoomOut();
 					}
-				} else if (evt.data?.type === "html-experience-toggle-search") {
+				} else if (data.type === "html-experience-toggle-search") {
 					this.toggleSearchBar();
-				} else if (evt.data?.type === "html-experience-open-link") {
-					window.open(evt.data.url, "_blank");
+				} else if (data.type === "html-experience-open-link" && data.url) {
+					window.open(data.url, "_blank");
 				}
 			};
 			window.addEventListener("message", this._messageHandler);
 
-			this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
+			this.registerDomEvent(activeDocument, "keydown", (evt: KeyboardEvent) => {
 				if (evt.ctrlKey && evt.key === "f" && this.searchBar) {
 					evt.preventDefault();
 					this.toggleSearchBar();
@@ -298,7 +305,7 @@ class HTMLExperienceView extends FileView {
 			if (contentType?.startsWith("text/html")) {
 				htmlContent = body;
 			} else if (location && body) {
-				const dataUrl = `data:${contentType};base64,${btoa(unescape(encodeURIComponent(body)))}`;
+				const dataUrl = `data:${contentType};base64,${base64Encode(body)}`;
 				resources[location] = dataUrl;
 			}
 		}
@@ -319,10 +326,10 @@ class HTMLExperienceView extends FileView {
 	}
 
 	toggleFullscreen(): void {
-		if (!document.fullscreenElement) {
-			this.containerEl.requestFullscreen();
+		if (!activeDocument.fullscreenElement) {
+			void this.containerEl.requestFullscreen();
 		} else {
-			document.exitFullscreen();
+			void activeDocument.exitFullscreen();
 		}
 	}
 
@@ -352,10 +359,7 @@ class HTMLExperienceView extends FileView {
 
 	private applyZoom(): void {
 		if (this.iframe) {
-			this.iframe.style.transform = `scale(${this.zoomLevel})`;
-			this.iframe.style.transformOrigin = "top left";
-			this.iframe.style.width = `${100 / this.zoomLevel}%`;
-			this.iframe.style.height = `${100 / this.zoomLevel}%`;
+			this.iframe.style.setProperty("--html-experience-zoom", String(this.zoomLevel));
 		}
 	}
 
@@ -524,7 +528,7 @@ class HTMLExperienceView extends FileView {
 class HTMLExperienceSettingTab extends PluginSettingTab {
 	plugin: HTMLExperiencePlugin;
 
-	constructor(app: any, plugin: HTMLExperiencePlugin) {
+	constructor(app: App, plugin: HTMLExperiencePlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
@@ -742,7 +746,7 @@ export default class HTMLExperiencePlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<HTMLExperienceSettings>);
 	}
 
 	async saveSettings(): Promise<void> {
@@ -752,7 +756,7 @@ export default class HTMLExperiencePlugin extends Plugin {
 	reloadActiveView(): void {
 		const activeView = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
 		if (activeView && activeView.file) {
-			activeView.onLoadFile(activeView.file);
+			void activeView.onLoadFile(activeView.file);
 		}
 	}
 
@@ -761,12 +765,12 @@ export default class HTMLExperiencePlugin extends Plugin {
 		for (const leaf of leaves) {
 			const view = leaf.view as HTMLExperienceView;
 			if (view.file && view.file.path === file.path) {
-				view.onLoadFile(file);
+				void view.onLoadFile(file);
 			}
 		}
 	}
 
-	async onunload(): Promise<void> {
+	onunload(): void {
 		// Don't detach leaves - guidelines say not to
 	}
 }

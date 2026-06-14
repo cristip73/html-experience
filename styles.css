@@ -45,8 +45,10 @@
 }
 
 .html-experience-iframe {
-	width: 100%;
-	height: 100%;
+	transform-origin: top left;
+	transform: scale(var(--html-experience-zoom, 1));
+	width: calc(100% / var(--html-experience-zoom, 1));
+	height: calc(100% / var(--html-experience-zoom, 1));
 	border: none;
 }
 
@@ -83,12 +85,3 @@
 	color: var(--text-error);
 }
 
-.html-experience-search-mark {
-	background: yellow !important;
-	color: black !important;
-}
-
-.html-experience-search-mark-current {
-	background: #ff6b6b !important;
-	outline: 2px solid #ff0000 !important;
-}

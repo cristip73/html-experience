@@ -29,6 +29,14 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
 var VIEW_TYPE_HTML_EXPERIENCE = "html-experience-view";
+function base64Encode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
 var DEFAULT_SETTINGS = {
   enableScripts: true,
   sandboxPermissions: "allow-scripts allow-same-origin allow-forms allow-popups allow-modals",
@@ -136,7 +144,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
         attr: { sandbox }
       });
       if (this.plugin.settings.showThemeButton) {
-        const isCurrentlyDark = this.forceDark || document.body.classList.contains("theme-dark");
+        const isCurrentlyDark = this.forceDark || activeDocument.body.classList.contains("theme-dark");
         const themeBtn = this.mainView.createEl("button", {
           cls: `html-experience-theme-btn ${isCurrentlyDark ? "html-experience-theme-btn-dark" : "html-experience-theme-btn-light"}`,
           text: isCurrentlyDark ? "\u2600" : "\u263E"
@@ -169,7 +177,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
 				mark.html-experience-search-mark-current { background: #ff6b6b !important; outline: 2px solid #ff0000 !important; }
 			`;
       doc.head.appendChild(searchStyle);
-      const isDark = this.forceDark || !this.forceDark && document.body.classList.contains("theme-dark");
+      const isDark = this.forceDark || !this.forceDark && activeDocument.body.classList.contains("theme-dark");
       const hasCustomBg = this.plugin.settings.backgroundColorEnabled;
       const themeDisabled = this.plugin.settings.disableTheme;
       if (!themeDisabled) {
@@ -208,8 +216,8 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
         }
         doc.head.appendChild(style);
       }
-      const zoomScript = doc.createElement("script");
-      zoomScript.textContent = `
+      const serializedDoc = new XMLSerializer().serializeToString(doc);
+      this.iframe.srcdoc = serializedDoc.replace("</body>", `<script>
 				document.addEventListener("wheel", function(evt) {
 					if (evt.ctrlKey) {
 						evt.preventDefault();
@@ -232,9 +240,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
 						}
 					}
 				});
-			`;
-      doc.body.appendChild(zoomScript);
-      this.iframe.srcdoc = new XMLSerializer().serializeToString(doc);
+			<\/script></body>`);
       this.iframe.addEventListener("wheel", (evt) => {
         if (evt.ctrlKey) {
           evt.preventDefault();
@@ -246,21 +252,22 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
         }
       }, { passive: false });
       this._messageHandler = (evt) => {
-        var _a, _b, _c;
-        if (((_a = evt.data) == null ? void 0 : _a.type) === "html-experience-zoom") {
-          if (evt.data.deltaY < 0) {
+        var _a;
+        const data = evt.data;
+        if (data.type === "html-experience-zoom") {
+          if (((_a = data.deltaY) != null ? _a : 0) < 0) {
             this.zoomIn();
           } else {
             this.zoomOut();
           }
-        } else if (((_b = evt.data) == null ? void 0 : _b.type) === "html-experience-toggle-search") {
+        } else if (data.type === "html-experience-toggle-search") {
           this.toggleSearchBar();
-        } else if (((_c = evt.data) == null ? void 0 : _c.type) === "html-experience-open-link") {
-          window.open(evt.data.url, "_blank");
+        } else if (data.type === "html-experience-open-link" && data.url) {
+          window.open(data.url, "_blank");
         }
       };
       window.addEventListener("message", this._messageHandler);
-      this.registerDomEvent(document, "keydown", (evt) => {
+      this.registerDomEvent(activeDocument, "keydown", (evt) => {
         if (evt.ctrlKey && evt.key === "f" && this.searchBar) {
           evt.preventDefault();
           this.toggleSearchBar();
@@ -291,7 +298,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       if (contentType == null ? void 0 : contentType.startsWith("text/html")) {
         htmlContent = body;
       } else if (location && body) {
-        const dataUrl = `data:${contentType};base64,${btoa(unescape(encodeURIComponent(body)))}`;
+        const dataUrl = `data:${contentType};base64,${base64Encode(body)}`;
         resources[location] = dataUrl;
       }
     }
@@ -308,10 +315,10 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     this.applyZoom();
   }
   toggleFullscreen() {
-    if (!document.fullscreenElement) {
-      this.containerEl.requestFullscreen();
+    if (!activeDocument.fullscreenElement) {
+      void this.containerEl.requestFullscreen();
     } else {
-      document.exitFullscreen();
+      void activeDocument.exitFullscreen();
     }
   }
   zoomOut() {
@@ -337,10 +344,7 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
   }
   applyZoom() {
     if (this.iframe) {
-      this.iframe.style.transform = `scale(${this.zoomLevel})`;
-      this.iframe.style.transformOrigin = "top left";
-      this.iframe.style.width = `${100 / this.zoomLevel}%`;
-      this.iframe.style.height = `${100 / this.zoomLevel}%`;
+      this.iframe.style.setProperty("--html-experience-zoom", String(this.zoomLevel));
     }
   }
   toggleThemeStyles(dark) {
@@ -673,7 +677,7 @@ var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
   reloadActiveView() {
     const activeView = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
     if (activeView && activeView.file) {
-      activeView.onLoadFile(activeView.file);
+      void activeView.onLoadFile(activeView.file);
     }
   }
   reloadViewsForFile(file) {
@@ -681,10 +685,10 @@ var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
     for (const leaf of leaves) {
       const view = leaf.view;
       if (view.file && view.file.path === file.path) {
-        view.onLoadFile(file);
+        void view.onLoadFile(file);
       }
     }
   }
-  async onunload() {
+  onunload() {
   }
 };

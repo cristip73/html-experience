@@ -130,6 +130,13 @@ var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
     await this.loadSettings();
     this.registerView(VIEW_TYPE_HTML_EXPERIENCE, (leaf) => new HTMLExperienceView(leaf, this));
     this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML_EXPERIENCE);
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (file instanceof import_obsidian.TFile && ["html", "htm"].includes(file.extension)) {
+          this.reloadViewsForFile(file);
+        }
+      })
+    );
     this.addCommand({
       id: "reload-html-view",
       name: "Reload active HTML view",
@@ -147,6 +154,15 @@ var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
     const activeView = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
     if (activeView && activeView.file) {
       activeView.onLoadFile(activeView.file);
+    }
+  }
+  reloadViewsForFile(file) {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_HTML_EXPERIENCE);
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (view.file && view.file.path === file.path) {
+        view.onLoadFile(file);
+      }
     }
   }
   async onunload() {

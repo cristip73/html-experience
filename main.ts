@@ -156,6 +156,14 @@ export default class HTMLExperiencePlugin extends Plugin {
 
 		this.registerExtensions(["html", "htm"], VIEW_TYPE_HTML_EXPERIENCE);
 
+		this.registerEvent(
+			this.app.vault.on("modify", (file) => {
+				if (file instanceof TFile && ["html", "htm"].includes(file.extension)) {
+					this.reloadViewsForFile(file);
+				}
+			})
+		);
+
 		this.addCommand({
 			id: "reload-html-view",
 			name: "Reload active HTML view",
@@ -177,6 +185,16 @@ export default class HTMLExperiencePlugin extends Plugin {
 		const activeView = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
 		if (activeView && activeView.file) {
 			activeView.onLoadFile(activeView.file);
+		}
+	}
+
+	reloadViewsForFile(file: TFile): void {
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_HTML_EXPERIENCE);
+		for (const leaf of leaves) {
+			const view = leaf.view as HTMLExperienceView;
+			if (view.file && view.file.path === file.path) {
+				view.onLoadFile(file);
+			}
 		}
 	}
 

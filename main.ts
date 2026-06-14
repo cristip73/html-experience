@@ -20,6 +20,8 @@ class HTMLExperienceView extends FileView {
 	plugin: HTMLExperiencePlugin;
 	iframe: HTMLIFrameElement | null = null;
 	mainView: HTMLDivElement | null = null;
+	searchBar: HTMLDivElement | null = null;
+	searchInput: HTMLInputElement | null = null;
 	zoomLevel: number = 1;
 	_messageHandler: ((evt: MessageEvent) => void) | null = null;
 
@@ -51,11 +53,41 @@ class HTMLExperienceView extends FileView {
 		this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden;");
 
 		const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
-		toolbar.setAttribute("style", "display: flex; gap: 4px; padding: 4px; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+		toolbar.setAttribute("style", "display: flex; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
 
 		toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
 		toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
 		toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
+
+		const searchBar = this.contentEl.createDiv({ cls: "html-experience-search-bar" });
+		searchBar.setAttribute("style", "display: none; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+		const searchInput = searchBar.createEl("input", {
+			attr: { type: "text", placeholder: "Search..." },
+		});
+		searchInput.setAttribute("style", "padding: 2px 6px; width: 200px;");
+		searchBar.createEl("button", { text: "Find" }).addEventListener("click", () => this.searchInIframe(searchInput.value));
+		searchBar.createEl("button", { text: "Clear" }).addEventListener("click", () => {
+			searchInput.value = "";
+			this.clearSearch();
+		});
+		searchBar.createEl("button", { text: "x" }).addEventListener("click", () => this.toggleSearchBar(false));
+
+		searchInput.addEventListener("input", () => {
+			if (searchInput.value) {
+				this.searchInIframe(searchInput.value);
+			} else {
+				this.clearSearch();
+			}
+		});
+
+		searchInput.addEventListener("keydown", (evt: KeyboardEvent) => {
+			if (evt.key === "Escape") {
+				this.toggleSearchBar(false);
+			}
+		});
+
+		this.searchBar = searchBar;
+		this.searchInput = searchInput;
 
 		const sandbox = this.plugin.settings.enableScripts
 			? this.plugin.settings.sandboxPermissions
@@ -91,6 +123,12 @@ class HTMLExperienceView extends FileView {
 					window.parent.postMessage({ type: "html-experience-zoom", deltaY: evt.deltaY }, "*");
 				}
 			}, { passive: false });
+			document.addEventListener("keydown", function(evt) {
+				if (evt.ctrlKey && evt.key === "f") {
+					evt.preventDefault();
+					window.parent.postMessage({ type: "html-experience-toggle-search" }, "*");
+				}
+			});
 		`;
 		doc.body.appendChild(zoomScript);
 
@@ -114,9 +152,18 @@ class HTMLExperienceView extends FileView {
 				} else {
 					this.zoomOut();
 				}
+			} else if (evt.data?.type === "html-experience-toggle-search") {
+				this.toggleSearchBar();
 			}
 		};
 		window.addEventListener("message", this._messageHandler);
+
+		this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
+			if (evt.ctrlKey && evt.key === "f" && this.searchBar) {
+				evt.preventDefault();
+				this.toggleSearchBar();
+			}
+		});
 	}
 
 	zoomIn(): void {
@@ -134,6 +181,19 @@ class HTMLExperienceView extends FileView {
 		this.applyZoom();
 	}
 
+	toggleSearchBar(forceState?: boolean): void {
+		if (!this.searchBar) return;
+		const visible = forceState ?? this.searchBar.style.display === "none";
+		this.searchBar.style.display = visible ? "flex" : "none";
+		if (visible && this.searchInput) {
+			this.searchInput.focus();
+			this.searchInput.select();
+		}
+		if (!visible) {
+			this.clearSearch();
+		}
+	}
+
 	private applyZoom(): void {
 		if (this.iframe) {
 			this.iframe.style.transform = `scale(${this.zoomLevel})`;
@@ -141,6 +201,35 @@ class HTMLExperienceView extends FileView {
 			this.iframe.style.width = `${100 / this.zoomLevel}%`;
 			this.iframe.style.height = `${100 / this.zoomLevel}%`;
 		}
+	}
+
+	searchInIframe(query: string): void {
+		if (!this.iframe?.contentDocument || !query) return;
+		this.clearSearch();
+		const body = this.iframe.contentDocument.body;
+		const walker = this.iframe.contentDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+		const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+		while (walker.nextNode()) {
+			const node = walker.currentNode;
+			if (node.parentElement?.tagName === "SCRIPT" || node.parentElement?.tagName === "STYLE") continue;
+			if (regex.test(node.textContent || "")) {
+				const span = this.iframe.contentDocument.createElement("span");
+				span.innerHTML = (node.textContent || "").replace(regex, `<mark style="background: yellow; color: black;">$1</mark>`);
+				node.parentElement?.replaceChild(span, node);
+			}
+		}
+	}
+
+	clearSearch(): void {
+		if (!this.iframe?.contentDocument) return;
+		const marks = this.iframe.contentDocument.querySelectorAll("mark");
+		marks.forEach((mark) => {
+			const parent = mark.parentNode;
+			if (parent) {
+				parent.replaceChild(this.iframe!.contentDocument!.createTextNode(mark.textContent || ""), mark);
+				parent.normalize();
+			}
+		});
 	}
 
 	canRenameExtension(extension: string): boolean {
@@ -278,6 +367,19 @@ export default class HTMLExperiencePlugin extends Plugin {
 				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
 				if (view) {
 					if (!checking) view.resetZoom();
+					return true;
+				}
+				return false;
+			},
+		});
+
+		this.addCommand({
+			id: "search-html",
+			name: "Search in HTML view",
+			checkCallback: (checking: boolean) => {
+				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+				if (view) {
+					if (!checking) view.toggleSearchBar();
 					return true;
 				}
 				return false;

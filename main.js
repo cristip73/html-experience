@@ -40,6 +40,8 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     super(leaf);
     this.iframe = null;
     this.mainView = null;
+    this.searchBar = null;
+    this.searchInput = null;
     this.zoomLevel = 1;
     this._messageHandler = null;
     this.plugin = plugin;
@@ -61,10 +63,36 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     this.mainView = this.contentEl.createDiv();
     this.mainView.setAttribute("style", "display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden;");
     const toolbar = this.contentEl.createDiv({ cls: "html-experience-toolbar" });
-    toolbar.setAttribute("style", "display: flex; gap: 4px; padding: 4px; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+    toolbar.setAttribute("style", "display: flex; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
     toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
     toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
     toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
+    const searchBar = this.contentEl.createDiv({ cls: "html-experience-search-bar" });
+    searchBar.setAttribute("style", "display: none; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
+    const searchInput = searchBar.createEl("input", {
+      attr: { type: "text", placeholder: "Search..." }
+    });
+    searchInput.setAttribute("style", "padding: 2px 6px; width: 200px;");
+    searchBar.createEl("button", { text: "Find" }).addEventListener("click", () => this.searchInIframe(searchInput.value));
+    searchBar.createEl("button", { text: "Clear" }).addEventListener("click", () => {
+      searchInput.value = "";
+      this.clearSearch();
+    });
+    searchBar.createEl("button", { text: "x" }).addEventListener("click", () => this.toggleSearchBar(false));
+    searchInput.addEventListener("input", () => {
+      if (searchInput.value) {
+        this.searchInIframe(searchInput.value);
+      } else {
+        this.clearSearch();
+      }
+    });
+    searchInput.addEventListener("keydown", (evt) => {
+      if (evt.key === "Escape") {
+        this.toggleSearchBar(false);
+      }
+    });
+    this.searchBar = searchBar;
+    this.searchInput = searchInput;
     const sandbox = this.plugin.settings.enableScripts ? this.plugin.settings.sandboxPermissions : "allow-same-origin";
     this.iframe = this.mainView.createEl("iframe", {
       cls: "html-experience-iframe",
@@ -92,6 +120,12 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
 					window.parent.postMessage({ type: "html-experience-zoom", deltaY: evt.deltaY }, "*");
 				}
 			}, { passive: false });
+			document.addEventListener("keydown", function(evt) {
+				if (evt.ctrlKey && evt.key === "f") {
+					evt.preventDefault();
+					window.parent.postMessage({ type: "html-experience-toggle-search" }, "*");
+				}
+			});
 		`;
     doc.body.appendChild(zoomScript);
     this.iframe.srcdoc = doc.documentElement.outerHTML;
@@ -106,16 +140,24 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       }
     }, { passive: false });
     this._messageHandler = (evt) => {
-      var _a;
+      var _a, _b;
       if (((_a = evt.data) == null ? void 0 : _a.type) === "html-experience-zoom") {
         if (evt.data.deltaY < 0) {
           this.zoomIn();
         } else {
           this.zoomOut();
         }
+      } else if (((_b = evt.data) == null ? void 0 : _b.type) === "html-experience-toggle-search") {
+        this.toggleSearchBar();
       }
     };
     window.addEventListener("message", this._messageHandler);
+    this.registerDomEvent(document, "keydown", (evt) => {
+      if (evt.ctrlKey && evt.key === "f" && this.searchBar) {
+        evt.preventDefault();
+        this.toggleSearchBar();
+      }
+    });
   }
   zoomIn() {
     this.zoomLevel = Math.min(3, this.zoomLevel + 0.1);
@@ -129,6 +171,18 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
     this.zoomLevel = 1;
     this.applyZoom();
   }
+  toggleSearchBar(forceState) {
+    if (!this.searchBar) return;
+    const visible = forceState != null ? forceState : this.searchBar.style.display === "none";
+    this.searchBar.style.display = visible ? "flex" : "none";
+    if (visible && this.searchInput) {
+      this.searchInput.focus();
+      this.searchInput.select();
+    }
+    if (!visible) {
+      this.clearSearch();
+    }
+  }
   applyZoom() {
     if (this.iframe) {
       this.iframe.style.transform = `scale(${this.zoomLevel})`;
@@ -136,6 +190,35 @@ var HTMLExperienceView = class extends import_obsidian.FileView {
       this.iframe.style.width = `${100 / this.zoomLevel}%`;
       this.iframe.style.height = `${100 / this.zoomLevel}%`;
     }
+  }
+  searchInIframe(query) {
+    var _a, _b, _c, _d;
+    if (!((_a = this.iframe) == null ? void 0 : _a.contentDocument) || !query) return;
+    this.clearSearch();
+    const body = this.iframe.contentDocument.body;
+    const walker = this.iframe.contentDocument.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      if (((_b = node.parentElement) == null ? void 0 : _b.tagName) === "SCRIPT" || ((_c = node.parentElement) == null ? void 0 : _c.tagName) === "STYLE") continue;
+      if (regex.test(node.textContent || "")) {
+        const span = this.iframe.contentDocument.createElement("span");
+        span.innerHTML = (node.textContent || "").replace(regex, `<mark style="background: yellow; color: black;">$1</mark>`);
+        (_d = node.parentElement) == null ? void 0 : _d.replaceChild(span, node);
+      }
+    }
+  }
+  clearSearch() {
+    var _a;
+    if (!((_a = this.iframe) == null ? void 0 : _a.contentDocument)) return;
+    const marks = this.iframe.contentDocument.querySelectorAll("mark");
+    marks.forEach((mark) => {
+      const parent = mark.parentNode;
+      if (parent) {
+        parent.replaceChild(this.iframe.contentDocument.createTextNode(mark.textContent || ""), mark);
+        parent.normalize();
+      }
+    });
   }
   canRenameExtension(extension) {
     return false;
@@ -239,6 +322,18 @@ var HTMLExperiencePlugin = class extends import_obsidian.Plugin {
         const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
         if (view) {
           if (!checking) view.resetZoom();
+          return true;
+        }
+        return false;
+      }
+    });
+    this.addCommand({
+      id: "search-html",
+      name: "Search in HTML view",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+        if (view) {
+          if (!checking) view.toggleSearchBar();
           return true;
         }
         return false;

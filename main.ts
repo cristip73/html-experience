@@ -72,6 +72,7 @@ class HTMLExperienceView extends FileView {
 		toolbar.createEl("button", { text: "+" }).addEventListener("click", () => this.zoomIn());
 		toolbar.createEl("button", { text: "-" }).addEventListener("click", () => this.zoomOut());
 		toolbar.createEl("button", { text: "Reset" }).addEventListener("click", () => this.resetZoom());
+		toolbar.createEl("button", { text: "\u26F6" }).addEventListener("click", () => this.toggleFullscreen());
 
 		const searchBar = this.contentEl.createDiv({ cls: "html-experience-search-bar" });
 		searchBar.setAttribute("style", "display: none; gap: 4px; padding: 4px; align-items: center; background: var(--background-secondary); border-bottom: 1px solid var(--background-modifier-border);");
@@ -294,6 +295,14 @@ class HTMLExperienceView extends FileView {
 	zoomIn(): void {
 		this.zoomLevel = Math.min(3, this.zoomLevel + 0.1);
 		this.applyZoom();
+	}
+
+	toggleFullscreen(): void {
+		if (!document.fullscreenElement) {
+			this.containerEl.requestFullscreen();
+		} else {
+			document.exitFullscreen();
+		}
 	}
 
 	zoomOut(): void {
@@ -576,6 +585,19 @@ export default class HTMLExperiencePlugin extends Plugin {
 				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
 				if (view) {
 					if (!checking) view.resetZoom();
+					return true;
+				}
+				return false;
+			},
+		});
+
+		this.addCommand({
+			id: "toggle-fullscreen",
+			name: "Toggle full screen",
+			checkCallback: (checking: boolean) => {
+				const view = this.app.workspace.getActiveViewOfType(HTMLExperienceView);
+				if (view) {
+					if (!checking) view.toggleFullscreen();
 					return true;
 				}
 				return false;

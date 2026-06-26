@@ -1,11 +1,44 @@
 import { App, FileView, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf } from "obsidian";
 
-// Mermaid library, base64-encoded and injected at build time by esbuild (define)
-// from vendor/mermaid.min.js. Loaded into the iframe via a data: URI <script src>
-// so diagrams render fully offline (desktop + mobile) with no HTML-parsing hazards.
-declare const MERMAID_B64: string;
+// Mermaid library, gzipped + base64-encoded at build time by esbuild (define) from
+// vendor/mermaid.min.js (~1.3 MB, vs ~3.5 MB raw - keeps main.js small enough to
+// sync via iCloud and load on mobile). Inflated once at runtime and injected into
+// the iframe via a data: URI <script src> (no HTML-parsing hazards).
+declare const MERMAID_GZ_B64: string;
 
 const VIEW_TYPE_HTML_EXPERIENCE = "html-experience-view";
+
+// Gunzips the embedded Mermaid library and returns a `data:text/javascript;base64,...`
+// URL ready to drop into a <script src>. Computed once per session. Returns null if
+// the platform lacks DecompressionStream (older webview) - Mermaid then degrades to
+// raw text but the document and the plugin still work.
+let cachedMermaidDataUrl: string | null | undefined;
+async function getMermaidDataUrl(): Promise<string | null> {
+	if (cachedMermaidDataUrl !== undefined) return cachedMermaidDataUrl;
+	try {
+		if (typeof DecompressionStream === "undefined") {
+			cachedMermaidDataUrl = null;
+			return null;
+		}
+		const bin = atob(MERMAID_GZ_B64);
+		const gz = new Uint8Array(bin.length);
+		for (let i = 0; i < bin.length; i++) gz[i] = bin.charCodeAt(i);
+		const buf = await new Response(
+			new Blob([gz]).stream().pipeThrough(new DecompressionStream("gzip"))
+		).arrayBuffer();
+		cachedMermaidDataUrl = await new Promise<string>((resolve, reject) => {
+			const fr = new FileReader();
+			fr.onload = () => resolve(fr.result as string);
+			fr.onerror = () => reject(fr.error);
+			fr.readAsDataURL(new Blob([buf], { type: "text/javascript" }));
+		});
+		return cachedMermaidDataUrl;
+	} catch (e) {
+		console.error("[HTML Experience] failed to inflate bundled Mermaid", e);
+		cachedMermaidDataUrl = null;
+		return null;
+	}
+}
 
 function base64Encode(str: string): string {
 	const bytes = new TextEncoder().encode(str);
@@ -241,50 +274,55 @@ class HTMLExperienceView extends FileView {
 
 			let mermaidBootstrap = "";
 			if (usesMermaid) {
-				// Load the bundled library via a data: URI <script src>. The base64
-				// payload has no HTML-significant characters, so it survives both the
-				// HTML parser (no "</script>"/"<!--" hazards) and String.replace (no "$").
-				const libTag = `<script src="data:text/javascript;base64,${MERMAID_B64}"></script>`;
-				if (/<\/head>/i.test(serializedDoc)) {
-					serializedDoc = serializedDoc.replace(/<\/head>/i, `${libTag}</head>`);
-				} else {
-					serializedDoc = libTag + serializedDoc;
+				// Inflate the gzipped Mermaid library into a data: URI <script src>. The
+				// base64 payload has no HTML-significant characters, so it survives both
+				// the HTML parser (no "</script>"/"<!--") and String.replace (no "$").
+				// Null when the platform lacks DecompressionStream - Mermaid then stays
+				// as raw text, but the document and the plugin still load fine.
+				const mermaidDataUrl = await getMermaidDataUrl();
+				if (mermaidDataUrl) {
+					const libTag = `<script src="${mermaidDataUrl}"></script>`;
+					if (/<\/head>/i.test(serializedDoc)) {
+						serializedDoc = serializedDoc.replace(/<\/head>/i, () => `${libTag}</head>`);
+					} else {
+						serializedDoc = libTag + serializedDoc;
+					}
+					// Neutralize any CDN Mermaid loader so offline documents don't hit
+					// the network (and don't double-render against our bundled copy).
+					serializedDoc = serializedDoc.replace(
+						/https?:\/\/[^"')\s]*mermaid[^"')\s]*\.m?js/gi,
+						"data:text/javascript,"
+					);
+					mermaidBootstrap = `<script>
+						(function () {
+							if (window.__htmlExperienceMermaid) return;
+							window.__htmlExperienceMermaid = true;
+							var theme = ${isDark ? '"dark"' : '"default"'};
+							var tries = 0;
+							// The library loads via a data: URI <script src>; poll until the
+							// global is ready (resilient to execution-timing differences across
+							// platforms, e.g. mobile webviews), then initialize and render.
+							var start = function () {
+								if (!window.mermaid) {
+									if (tries++ > 100) { console.error("[HTML Experience] mermaid failed to load"); return; }
+									setTimeout(start, 30);
+									return;
+								}
+								try {
+									window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: theme });
+									window.mermaid.run({ querySelector: ".mermaid" });
+								} catch (e) {
+									console.error("[HTML Experience] mermaid", e);
+								}
+							};
+							if (document.readyState === "loading") {
+								document.addEventListener("DOMContentLoaded", start);
+							} else {
+								start();
+							}
+						})();
+					</script>`;
 				}
-				// Neutralize any CDN Mermaid loader so offline documents don't hit
-				// the network (and don't double-render against our bundled copy).
-				serializedDoc = serializedDoc.replace(
-					/https?:\/\/[^"')\s]*mermaid[^"')\s]*\.m?js/gi,
-					"data:text/javascript,"
-				);
-				mermaidBootstrap = `<script>
-					(function () {
-						if (window.__htmlExperienceMermaid) return;
-						window.__htmlExperienceMermaid = true;
-						var theme = ${isDark ? '"dark"' : '"default"'};
-						var tries = 0;
-						// The library loads via a data: URI <script src>; poll until the
-						// global is ready (resilient to execution-timing differences across
-						// platforms, e.g. mobile webviews), then initialize and render.
-						var start = function () {
-							if (!window.mermaid) {
-								if (tries++ > 100) { console.error("[HTML Experience] mermaid failed to load"); return; }
-								setTimeout(start, 30);
-								return;
-							}
-							try {
-								window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: theme });
-								window.mermaid.run({ querySelector: ".mermaid" });
-							} catch (e) {
-								console.error("[HTML Experience] mermaid", e);
-							}
-						};
-						if (document.readyState === "loading") {
-							document.addEventListener("DOMContentLoaded", start);
-						} else {
-							start();
-						}
-					})();
-				</script>`;
 			}
 
 			this.iframe.srcdoc = serializedDoc.replace("</body>", `<script>

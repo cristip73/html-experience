@@ -1,15 +1,18 @@
 import esbuild from "esbuild";
 import process from "process";
 import fs from "fs";
+import zlib from "zlib";
 
 // Mermaid single-file UMD build, embedded into main.js so diagrams render fully
-// offline inside the sandboxed srcdoc iframe (desktop + mobile). We embed it
-// base64-encoded and load it via a data: URI <script src>, which sidesteps every
-// HTML-parsing hazard of inlining raw JS (a "</script>", "<!--" or "$" sequence in
-// the minified source would otherwise break the injected <script> tag).
+// offline inside the sandboxed srcdoc iframe (desktop + mobile). It is gzipped then
+// base64-encoded (~1.3 MB vs ~3.5 MB raw) to keep main.js small enough to sync
+// reliably (e.g. iCloud) and load on mobile. At runtime the plugin gunzips it
+// (DecompressionStream) and injects it via a data: URI <script src> - base64 has no
+// HTML-significant chars, so it sidesteps every parsing hazard of inlining raw JS
+// (a "</script>", "<!--" or "$" in the minified source would break the <script>).
 // Pinned vendored copy: vendor/mermaid.min.js (see vendor/README.md for version).
-const MERMAID_SRC = fs.readFileSync("vendor/mermaid.min.js", "utf8");
-const MERMAID_B64 = Buffer.from(MERMAID_SRC, "utf8").toString("base64");
+const MERMAID_SRC = fs.readFileSync("vendor/mermaid.min.js");
+const MERMAID_GZ_B64 = zlib.gzipSync(MERMAID_SRC, { level: 9 }).toString("base64");
 
 const builtins = [
 	"_http_agent", "_http_client", "_http_common", "_http_incoming", "_http_outgoing",
@@ -56,7 +59,7 @@ const context = await esbuild.context({
 	format: "cjs",
 	target: "es2018",
 	define: {
-		MERMAID_B64: JSON.stringify(MERMAID_B64),
+		MERMAID_GZ_B64: JSON.stringify(MERMAID_GZ_B64),
 	},
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",

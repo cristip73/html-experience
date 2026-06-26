@@ -1,5 +1,15 @@
 import esbuild from "esbuild";
 import process from "process";
+import fs from "fs";
+
+// Mermaid single-file UMD build, embedded into main.js so diagrams render fully
+// offline inside the sandboxed srcdoc iframe (desktop + mobile). We embed it
+// base64-encoded and load it via a data: URI <script src>, which sidesteps every
+// HTML-parsing hazard of inlining raw JS (a "</script>", "<!--" or "$" sequence in
+// the minified source would otherwise break the injected <script> tag).
+// Pinned vendored copy: vendor/mermaid.min.js (see vendor/README.md for version).
+const MERMAID_SRC = fs.readFileSync("vendor/mermaid.min.js", "utf8");
+const MERMAID_B64 = Buffer.from(MERMAID_SRC, "utf8").toString("base64");
 
 const builtins = [
 	"_http_agent", "_http_client", "_http_common", "_http_incoming", "_http_outgoing",
@@ -45,6 +55,9 @@ const context = await esbuild.context({
 	],
 	format: "cjs",
 	target: "es2018",
+	define: {
+		MERMAID_B64: JSON.stringify(MERMAID_B64),
+	},
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,

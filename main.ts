@@ -1,5 +1,10 @@
 import { App, FileView, Plugin, PluginSettingTab, Setting, TFile, WorkspaceLeaf } from "obsidian";
 
+// Mermaid library, base64-encoded and injected at build time by esbuild (define)
+// from vendor/mermaid.min.js. Loaded into the iframe via a data: URI <script src>
+// so diagrams render fully offline (desktop + mobile) with no HTML-parsing hazards.
+declare const MERMAID_B64: string;
+
 const VIEW_TYPE_HTML_EXPERIENCE = "html-experience-view";
 
 function base64Encode(str: string): string {
@@ -20,6 +25,7 @@ interface HTMLExperienceSettings {
 	showThemeButton: boolean;
 	disableTheme: boolean;
 	mhtmlSupport: boolean;
+	offlineMermaid: boolean;
 }
 
 const DEFAULT_SETTINGS: HTMLExperienceSettings = {
@@ -31,6 +37,7 @@ const DEFAULT_SETTINGS: HTMLExperienceSettings = {
 	showThemeButton: true,
 	disableTheme: false,
 	mhtmlSupport: false,
+	offlineMermaid: true,
 };
 
 class HTMLExperienceView extends FileView {
@@ -217,7 +224,69 @@ class HTMLExperienceView extends FileView {
 				doc.head.appendChild(style);
 			}
 
-			const serializedDoc = new XMLSerializer().serializeToString(doc);
+			// HTML serialization (NOT XMLSerializer): XML serialization escapes "<"
+			// and "&" inside <script>/<style> text, which corrupts any inline script
+			// containing comparisons (e.g. "i < n") and breaks the document's own JS.
+			// documentElement.outerHTML serializes as HTML, leaving raw text intact.
+			let serializedDoc = "<!DOCTYPE html>" + doc.documentElement.outerHTML;
+
+			// --- Offline Mermaid -------------------------------------------------
+			// If the document uses Mermaid (.mermaid blocks), embed the bundled
+			// library so diagrams render with NO network (works on mobile and fully
+			// offline). We inject post-serialization as a data: URI <script src>.
+			const usesMermaid =
+				this.plugin.settings.enableScripts &&
+				this.plugin.settings.offlineMermaid &&
+				!!doc.querySelector(".mermaid, pre.mermaid, code.language-mermaid");
+
+			let mermaidBootstrap = "";
+			if (usesMermaid) {
+				// Load the bundled library via a data: URI <script src>. The base64
+				// payload has no HTML-significant characters, so it survives both the
+				// HTML parser (no "</script>"/"<!--" hazards) and String.replace (no "$").
+				const libTag = `<script src="data:text/javascript;base64,${MERMAID_B64}"></script>`;
+				if (/<\/head>/i.test(serializedDoc)) {
+					serializedDoc = serializedDoc.replace(/<\/head>/i, `${libTag}</head>`);
+				} else {
+					serializedDoc = libTag + serializedDoc;
+				}
+				// Neutralize any CDN Mermaid loader so offline documents don't hit
+				// the network (and don't double-render against our bundled copy).
+				serializedDoc = serializedDoc.replace(
+					/https?:\/\/[^"')\s]*mermaid[^"')\s]*\.m?js/gi,
+					"data:text/javascript,"
+				);
+				mermaidBootstrap = `<script>
+					(function () {
+						if (window.__htmlExperienceMermaid) return;
+						window.__htmlExperienceMermaid = true;
+						var theme = ${isDark ? '"dark"' : '"default"'};
+						var tries = 0;
+						// The library loads via a data: URI <script src>; poll until the
+						// global is ready (resilient to execution-timing differences across
+						// platforms, e.g. mobile webviews), then initialize and render.
+						var start = function () {
+							if (!window.mermaid) {
+								if (tries++ > 100) { console.error("[HTML Experience] mermaid failed to load"); return; }
+								setTimeout(start, 30);
+								return;
+							}
+							try {
+								window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: theme });
+								window.mermaid.run({ querySelector: ".mermaid" });
+							} catch (e) {
+								console.error("[HTML Experience] mermaid", e);
+							}
+						};
+						if (document.readyState === "loading") {
+							document.addEventListener("DOMContentLoaded", start);
+						} else {
+							start();
+						}
+					})();
+				</script>`;
+			}
+
 			this.iframe.srcdoc = serializedDoc.replace("</body>", `<script>
 				document.addEventListener("wheel", function(evt) {
 					if (evt.ctrlKey) {
@@ -241,7 +310,7 @@ class HTMLExperienceView extends FileView {
 						}
 					}
 				});
-			</script></body>`);
+			</script>${mermaidBootstrap}</body>`);
 
 			this.iframe.addEventListener("wheel", (evt: WheelEvent) => {
 				if (evt.ctrlKey) {
@@ -543,6 +612,16 @@ class HTMLExperienceSettingTab extends PluginSettingTab {
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.enableScripts).onChange(async (value) => {
 					this.plugin.settings.enableScripts = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Offline Mermaid diagrams")
+			.setDesc("Render Mermaid diagrams using a built-in copy of the library, with no internet. Works on mobile and offline.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.offlineMermaid).onChange(async (value) => {
+					this.plugin.settings.offlineMermaid = value;
 					await this.plugin.saveSettings();
 				})
 			);
